@@ -1,0 +1,32 @@
+// Windows resources: icon and version block. build.rs fills in the @…@ fields for each
+// binary and compiles the result; see there.
+
+1 ICON "netscope.ico"
+
+@MANIFEST@
+
+1 VERSIONINFO
+FILEVERSION @NUMERIC@
+PRODUCTVERSION @NUMERIC@
+FILEOS 0x40004L
+FILETYPE 0x1L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "netscope project"
+      VALUE "FileDescription", "@DESCRIPTION@"
+      VALUE "FileVersion", "@VERSION@"
+      VALUE "InternalName", "@FILENAME@"
+      VALUE "LegalCopyright", "MIT License"
+      VALUE "OriginalFilename", "@FILENAME@"
+      VALUE "ProductName", "NetScope"
+      VALUE "ProductVersion", "@VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

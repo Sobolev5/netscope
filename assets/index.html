@@ -1,0 +1,1502 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>netscope</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Crect width=%2724%27 height=%2724%27 rx=%275%27 fill=%27%232563eb%27/%3E%3Cg fill=%27none%27 stroke=%27%23fff%27 stroke-width=%271.8%27%3E%3Ccircle cx=%2712%27 cy=%2712%27 r=%277%27/%3E%3Cpath d=%27M12 5v14M5 12h14M7.2 7.2c2.7 2.3 6.9 2.3 9.6 0M7.2 16.8c2.7-2.3 6.9-2.3 9.6 0%27/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root { --bg:#f3f4f6; --panel:#fff; --line:#e3e6eb; --line2:#eef0f3; --text:#1f2937; --muted:#6b7280; --faint:#9ca3af; --accent:#2563eb; --accent-soft:#eff6ff; --sel:#2563eb; }
+  /* :root outranks the generated preflight's html{} rule (app.css loads after this block). */
+  :root, body { background: var(--bg); color: var(--text); font: 13px/1.45 "Segoe UI", ui-sans-serif, system-ui, -apple-system, Roboto, sans-serif; line-height: 1.45; margin: 0; }
+  .mono { font-family: "Cascadia Mono", "JetBrains Mono", ui-monospace, Consolas, Menlo, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; }
+  .grid-table th { position: sticky; top: 0; z-index: 1; background: #f8f9fb; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .grid-table td { padding: 5px 10px; border-bottom: 1px solid var(--line2); vertical-align: middle; }
+  .grid-table tbody tr:hover td { background: #f6f8fc; }
+  .grid-table tr.clickable { cursor: pointer; }
+  .grid-table th.r, .grid-table td.r { text-align: right; white-space: nowrap; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .panel-h { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .panel-h h2 { font-size: 13px; font-weight: 600; margin: 0; }
+  .sub { color: var(--muted); font-weight: 400; }
+  .scroll { overflow: auto; }
+  .scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll::-webkit-scrollbar-thumb { background: #cfd4dc; border-radius: 6px; border: 2px solid #fff; }
+  .cc { display: inline-block; min-width: 22px; padding: 0 4px; border: 1px solid #cbd2dc; border-radius: 3px; font: 600 10px/16px ui-monospace, Consolas, monospace; color: #374151; background: #fff; text-align: center; }
+  .chip { display: inline-block; padding: 0 6px; border-radius: 4px; font: 600 10px/17px ui-sans-serif, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; }
+  .nav a { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 7px; color: #374151; text-decoration: none; }
+  .nav a:hover { background: #f1f3f6; }
+  .nav a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav svg { width: 17px; height: 17px; flex: none; }
+  .input { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 5px 10px; font-size: 13px; outline: none; color: var(--text); }
+  .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #dbeafe; }
+  .input.bad { border-color: #dc2626; box-shadow: 0 0 0 3px #fee2e2; }
+  .input.good { border-color: #16a34a; }
+  .btn { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 11px; font-size: 13px; cursor: pointer; color: #1f2937; white-space: nowrap; text-decoration: none; display: inline-block; }
+  .btn:hover { background: #f6f8fc; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn[disabled] { opacity: .6; cursor: wait; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { padding: 2px 9px; font-size: 12px; background: #fff; border: 0; cursor: pointer; color: var(--muted); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .pk td { padding: 2px 8px; border-bottom: 1px solid #fff; font-size: 12px; white-space: nowrap; }
+  .pk tr { cursor: pointer; }
+  .pk-http td { background: #e4ffc7; } .pk-tls td { background: #ebe9ff; } .pk-tcp td { background: #f3f2ff; }
+  .pk-dns td { background: #daeeff; } .pk-udp td { background: #e8f4ff; } .pk-quic td { background: #dcf5f5; }
+  .pk-icmp td { background: #fce0ff; } .pk-syn td { background: #e3e3e3; } .pk-rst td { background: #ffd9d9; color: #8a1111; }
+  .pk tr.sel td { background: var(--sel) !important; color: #fff !important; }
+  .tree summary { cursor: pointer; padding: 2px 6px; list-style: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tree summary::-webkit-details-marker { display: none; }
+  .tree summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--faint); }
+  .tree details[open] > summary::before { content: "▾"; }
+  .tree .f { padding: 1px 6px 1px 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+  .tree .f:hover, .tree summary:hover { background: #eef4ff; }
+  .hex span { padding: 0 1px; } .hex span.hl, .ascii span.hl { background: var(--sel); color: #fff; }
+  .lyr0 { color: #6b7280; } .lyr1 { color: #0369a1; } .lyr2 { color: #7c3aed; } .lyr3 { color: #047857; } .lyr4 { color: #b45309; } .lyr5 { color: #be185d; } .lyr6 { color: #c2410c; }
+  .arrow { color: var(--faint); font-size: 18px; align-self: center; }
+  .hopline { position: absolute; left: 15px; top: 0; bottom: 0; width: 2px; background: #dbe2ea; }
+  pre.stream { white-space: pre-wrap; word-break: break-all; margin: 0; }
+  .kpi .v { font-size: 20px; font-weight: 600; }
+  main a, #footer a { color: var(--accent); }
+  .map-land { fill: #e7ebf0; stroke: #cfd6df; stroke-width: .4; }
+  .map-grid { stroke: #eef1f5; stroke-width: .5; fill: none; }
+  .map-dot { cursor: pointer; }
+  .map-dot:hover { stroke: #111827; stroke-width: 1.5; }
+  .help code { background: #fff; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+  .map-wrap { position: relative; overflow: hidden; background: #f8fafc; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .map-svg { display: block; width: 100%; height: auto; cursor: grab; }
+  .map-svg.dragging { cursor: grabbing; }
+  .map-svg path, .map-svg line, .map-svg circle { vector-effect: non-scaling-stroke; }
+  .map-ctl { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .map-ctl button { width: 30px; height: 30px; border: 1px solid var(--line); background: #fff; border-radius: 7px; font-size: 17px; line-height: 1; cursor: pointer; color: #374151; box-shadow: 0 1px 2px rgb(0 0 0 / .06); }
+  .map-ctl button:hover { background: #f6f8fc; }
+  .map-label { font: 500 11px "Segoe UI", ui-sans-serif, system-ui, sans-serif; fill: #1f2937; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+  .map-zoom { position: absolute; left: 10px; bottom: 8px; font-size: 11px; color: var(--muted); background: rgb(255 255 255 / .85); padding: 1px 7px; border-radius: 4px; pointer-events: none; }
+  .nav-m { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; display: flex; overflow-x: auto; gap: 2px; padding: 4px 6px calc(4px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: #fff; }
+  .nav-m a { display: flex; flex: none; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; padding: 4px 6px; border-radius: 7px; color: #4b5563; font-size: 10px; text-decoration: none; }
+  .nav-m a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-m svg { width: 18px; height: 18px; }
+  @media (max-width: 767px) { main { padding-bottom: 72px; } }
+  .clickable:focus-visible, .grid-table tr.clickable:focus-visible td { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .kbd { display: inline-block; min-width: 18px; padding: 0 5px; border: 1px solid #cbd2dc; border-bottom-width: 2px; border-radius: 4px; background: #fff; font: 600 10px/16px ui-monospace, Consolas, monospace; color: #374151; text-align: center; }
+</style>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="flex min-h-screen flex-col">
+  <header class="sticky top-0 z-30 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-[#e3e6eb] bg-white px-4 py-2">
+    <a href="#/overview" class="flex items-center gap-2" style="text-decoration:none">
+      <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="#2563eb" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.6 5.6c3.5 3 9.3 3 12.8 0M5.6 18.4c3.5-3 9.3-3 12.8 0"/></svg>
+      <span class="text-[15px] font-semibold text-slate-800">net<span class="text-blue-600">scope</span></span>
+    </a>
+    <div id="source" class="order-last w-full min-w-0 truncate text-[12px] text-slate-500 sm:order-none sm:w-auto sm:flex-1"></div>
+    <button id="notify-btn" class="btn"></button>
+    <div class="seg" id="lang"><button data-lang="ru">RU</button><button data-lang="en">EN</button></div>
+    <span id="status" class="chip bg-slate-100 text-slate-600"></span>
+    <span id="conn" class="flex items-center gap-1.5 text-[12px] text-slate-500"></span>
+  </header>
+
+  <div class="flex flex-1">
+    <aside class="sticky top-[45px] hidden h-[calc(100vh-45px)] w-56 shrink-0 overflow-y-auto border-r border-[#e3e6eb] bg-white p-2 md:block">
+      <nav class="nav space-y-0.5" id="nav"></nav>
+      <div class="mt-4 border-t border-[#eef0f3] px-3 pt-3 text-[11px] leading-5 text-slate-400" id="side-info"></div>
+    </aside>
+    <main class="min-w-0 flex-1 p-4">
+      <div id="banner" role="alert" class="mb-3 hidden rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-red-800"></div>
+      <div id="view"></div>
+      <div class="mt-6 text-[11px] text-slate-500" id="footer"></div>
+    </main>
+  </div>
+</div>
+<nav class="nav-m md:hidden" id="nav-m" aria-label="menu"></nav>
+
+<script>
+"use strict";
+
+// ================= i18n =================
+
+const I18N = {
+  ru: {
+    connecting: "подключение…", starting: "запуск", live: "● live", replay: "воспроизведение", finished: "завершено", failed: "ошибка захвата",
+    conn_live: "данные идут", conn_polling: "переподключение…", conn_offline: "сервер недоступен",
+    nav_overview: "Обзор", nav_processes: "Процессы", nav_connections: "Соединения", nav_hosts: "Хосты", nav_map: "Карта", nav_route: "Маршрут", nav_dns: "DNS", nav_sockets: "Сокеты ОС", nav_alerts: "Предупреждения",
+    side_iface: "Интерфейс", side_geo: "Геоданные", on: "включены", off: "выключены", side_uptime: "Время работы",
+    capture_stopped: "Захват остановлен:", unknown_error: "неизвестная ошибка", waiting: "ждём данные…", loading: "загрузка…", nothing: "ничего не найдено",
+    k_download: "Загрузка", k_upload: "Отдача", k_procs: "Процессы в сети", k_conns: "Соединения", k_hosts: "Хосты", k_alerts: "Предупреждения",
+    total: "всего", conn_no_proc: "соед. без процесса", open: "открыто", countries_n: "стран", sev_short: "{h} выс. · {m} сред. · {l} низк.",
+    path_title: "Сетевой путь", path_more: "подробнее и трассировка →", step_pc: "Этот компьютер", step_vpn: "VPN / прокси", step_exit: "Выход в интернет", step_dst: "Куда идёт трафик",
+    exit_unknown: "не удалось определить: {e}", exit_pending: "определяется…", exit_off: "проверка выключена", cf_sees: "Cloudflare видит вас из {c}",
+    tunnel_note: "Захват идёт на интерфейсе VPN-туннеля: видны настоящие адреса сайтов, а не VPN-сервер.", tunnel_note2: " Сам туннель к VPN-серверу идёт через физический адаптер.",
+    top_procs: "Кто больше всех ходит в сеть", top_hosts: "Главные направления", countries: "Страны", recent_alerts: "Последние предупреждения", all: "все →", hosts_n: "хост.", no_data: "нет данных", no_ext: "нет внешних адресов", geo_off: "геоданные выключены", quiet: "всё спокойно",
+    processes: "Процессы", proc_hint: "щёлкните процесс, чтобы увидеть его соединения", program: "Программа", protocols: "Протоколы", goes_to: "Куда ходит", connections: "Соединения", received: "↓ Получено", sent: "↑ Отправлено", share: "Доля", activity: "Активность", signature: "Подпись",
+    n_procs: "{n} процесса", path_na: "путь недоступен", no_proc_row: "Без процесса", no_proc_hint: "— трафик других устройств сети (mDNS, broadcast) или соединения, закрывшиеся до опроса ОС",
+    attr_file: "Для файла захвата процессы неизвестны: трафик записан не на этой машине.", attr_partial: "Процессы определяются не полностью: {e}", no_attr_yet: "пока нет соединений с известным процессом…",
+    sig_signed: "подписан", sig_unsigned: "не подписан", sig_invalid: "подпись недействительна", sig_unknown: "не проверен", sig_pending: "проверяется…", risky_path: "запущен из временной папки",
+    conns_title: "Соединения", of: "из", filter_ph: "фильтр: chrome tls · process == Code.exe and country != RU · bytes > 1MB · rtt > 100ms", filter_help: "справка", export_csv: "CSV", export_pcap: ".pcap",
+    process: "Процесс", protocol: "Протокол", local_sock: "Локальный сокет", remote: "Удалённый", where: "Где", provider: "Провайдер", hops: "Хопы", hops_tip: "маршрутизаторов до хоста — по TTL полученных пакетов; если соединения терминирует прокси/NGFW, это расстояние до него", state: "Состояние", who: "Кто", rtt: "RTT", rtt_tip: "задержка TCP-рукопожатия (туда и обратно)", retrans: "Повторы", retrans_tip: "повторные передачи TCP — признак потерь", act: "Акт.",
+    st_opening: "устанавливается", st_established: "установлено", st_closing: "закрывается", st_closed: "закрыто", st_active: "активно", dir_out: "↗ исх.", dir_in: "↙ вх.",
+    proc_chip: "процесс: {p}", proc_sockets: "сокеты процесса →", unknown_proc: "неизвестно",
+    help_title: "Язык фильтров", help_body: "Слова ищутся везде: <code>chrome tls</code>. Поля: <code>поле == значение</code>, операторы <code>== != &gt; &lt; &gt;= &lt;= ~</code> (содержит) <code>!~</code>, списки <code>country in {US, DE}</code>, логика <code>and or not ( )</code>, маски <code>ip == 140.82.*</code>, единицы <code>1MB 500KB 100ms 2s</code>. Примеры: <code>process == Code.exe and country != RU</code> · <code>bytes &gt; 1MB and not signed</code> · <code>rtt &gt; 150ms or retrans &gt; 5</code> · <code>tls == \"TLS 1.2\"</code> · <code>doh</code>. Поля:",
+    filter_error: "ошибка в позиции {p}: {m}",
+    hosts: "Хосты", hosts_hint: "щёлкните, чтобы увидеть соединения", host: "Хост", host_ph: "имя, IP, страна, провайдер…", route_btn: "маршрут", watch_btn: "следить", watching: "отслеживается", lan: "LAN", spike_tip: "всплеск трафика к неизвестному хосту",
+    map: "Карта", map_hint: "кружок — хост (размер ~ объём трафика); линии ведут от точки выхода в интернет", map_offline: "контуры материков не загрузились — точки показаны на сетке", map_egress: "выход в интернет", map_vpn: "VPN-сервер", map_host: "хост", map_anycast: "anycast/CDN",
+    route: "Трассировка маршрута", trace: "трассировать", retrace: "повторить", tracing: "трассировка… (до 10 с)", trace_probe: "отправляем пробы с TTL 1…30 и ждём ответы маршрутизаторов…", trace_pick: "выберите адрес и нажмите «трассировать»", ip_ph: "IP-адрес",
+    trace_to: "до", reached: "цель достигнута", not_reached: "цель не ответила", hops_n: "{n} хопов", node: "Узел", delay: "Задержка", silent: "* * * не ответил", private_net: "частная сеть (роутер, VPN, сеть компании)", border: "граница {a}→{b}",
+    trace_note: "Трассировка отправляет ICMP-пробы с растущим TTL: каждый маршрутизатор отвечает «время жизни истекло». Узлы без ответа (* * *) — норма. При VPN первые хопы — внутренняя сеть туннеля.",
+    vpn_conns: "Соединения VPN- и прокси-клиентов", vpn_hint: "по таблице сокетов ОС", client: "Клиент", remote_addr: "Удалённый адрес",
+    watch_title: "Наблюдение за маршрутами", watch_hint: "трассировка раз в {m} мин; смена пути или рост задержки — предупреждение", watch_add: "добавить", watch_none: "нет хостов под наблюдением — нажмите «следить» у хоста или добавьте IP", watch_remove: "убрать", last_run: "Последний запуск", path: "Путь", history: "История", changed: "путь изменился", next_run: "следующий через {s}",
+    dns: "DNS-журнал", dns_hint: "запросы, ответы и кто их использовал", dns_ph: "домен, программа, адрес, NXDOMAIN…", time: "Время", name: "Имя", type: "Тип", result: "Результат", answers: "Ответы", latency: "Задержка", requester: "Кто спросил", used_by: "Кто подключился", resolver: "Резолвер",
+    dns_stats: "{q} запросов · {f} неудачных", enc_dns: "Зашифрованный DNS", enc_dns_hint: "DoH/DoT/DoQ: эти запросы не видны в журнале", enc_none: "не обнаружен",
+    sockets: "Сокеты ОС", sockets_hint: "таблица TCP/UDP ядра с владельцами", sock_ph: "процесс, адрес, порт, состояние…", local_addr: "Локальный адрес", sock_off: "недоступно для файла захвата",
+    alerts: "Предупреждения", sev_high: "Высокий", sev_medium: "Средний", sev_low: "Низкий", f_all: "Все", f_high: "Высокие", f_medium: "Средние", f_low: "Низкие", no_level: "нет предупреждений этого уровня",
+    back: "← назад", parent: "Родитель", local_socket: "Локальный сокет", remote_socket: "Удалённый сокет", located: "Где находится", hops_to: "Хопов до хоста", by_ttl: "по TTL; при прокси/NGFW — до него", who_opened: "Кто открыл", traffic: "Трафик", quality: "Качество связи",
+    opened_local: "наша сторона (исходящее)", opened_remote: "удалённая сторона (входящее)", opened_unknown: "открытие не попало в захват", os_closed: "в ОС уже закрыт", not_in_table: "не найден в таблице сокетов ОС",
+    rtt_hs: "RTT рукопожатия", retrans_full: "повторы ↑{o} ↓{i}", zero_win: "нулевое окно ×{n}",
+    t_packets: "Пакеты", t_stream: "Поток данных", t_tls: "TLS", t_route: "Маршрут до хоста", t_sockets: "Сокеты процесса", this_conn: "← это соединение", proc_unknown: "процесс неизвестен",
+    pkt_pick: "выберите пакет — ниже появятся его заголовки по уровням и байты (↑/↓ — переход)", pkt_parsing: "разбор пакета…", pkt_gone: "пакет больше не хранится", frame: "Кадр", bytes: "байт", sent_v: "отправлен", recv_v: "получен", hover_hint: "наведите на поле — подсветятся его байты", show_all: "показать все {n} байт", stored_of: "сохранено {a} из {b} байт кадра", kept_last: "хранятся последние {n} пакетов; ещё {d} более ранних вытеснены",
+    no_packets: "пакеты этого соединения не сохранены", src: "Источник", dst: "Назначение", length: "Длина", info: "Info", conn_gone: "Соединение не найдено — возможно, уже вытеснено из памяти.",
+    stream_out: "↑ отправлено нами", stream_in: "↓ получено", stream_bin: "двоичные данные (hex)", stream_gap: "… пропущено {n} байт (не попали в захват) …", stream_enc: "Соединение зашифровано (TLS/QUIC): видно рукопожатие, а полезные данные нечитаемы без ключей.", stream_none: "полезных данных нет (только служебные пакеты)", stream_trunc: "показаны первые 512 КБ", stream_drop: "начало может отсутствовать: {n} ранних пакетов не сохранены", assembling: "сборка потока…", packets_short: "пак.",
+    tls_client: "Клиент (ClientHello)", tls_server: "Сервер", ja4_tip: "JA4 — отпечаток TLS-библиотеки клиента: одинаков у всех соединений одной программы", alpn: "ALPN", version: "Версия", cipher: "Шифр", cert: "Сертификат", issued_to: "Кому", issued_by: "Кем выдан", valid_until: "Действует до", san: "Альтернативные имена", self_signed: "самоподписанный", expired: "истёк", tls13_certs: "В TLS 1.3 сертификат передаётся зашифрованным — его не видно в трафике.", tls_incomplete: "Начало соединения уже не хранится — рукопожатие прочитать нельзя.", no_tls: "TLS-рукопожатие не захвачено",
+    route_to: "Маршрут от этого компьютера до {ip}", proto: "Прото",
+    notify_on: "🔔 уведомления", notify_off: "🔕 уведомления", notify_tip: "уведомления браузера о новых предупреждениях", notify_denied: "браузер запретил уведомления",
+    ago_now: "сейчас", s: "с", min: "мин", h: "ч", ms: "мс",
+    footer: "геоданные: DB-IP Lite (CC BY 4.0) · контуры карты: Natural Earth",
+    version: "версия", serial: "Серийный номер", no_col: "№", os_state: "в ОС:", open_conns: "открытых",
+    method_icmp: "ICMP echo", method_tracert: "системный tracert", method_traceroute: "системный traceroute",
+    map_zoom_in: "приблизить", map_zoom_out: "отдалить", map_reset: "весь мир", map_drag_hint: "колесо мыши — масштаб, перетаскивание — сдвиг, двойной щелчок — приблизить",
+    geo_hint: "Геоданные не найдены. Скачайте их через меню значка NetScope в трее («Скачать геоданные») или скриптом scripts/fetch-geoip.ps1.",
+    key_hint: "фильтр", api_error: "Ошибка запроса",
+    nav_settings: "Настройки", settings: "Настройки", set_file: "файл", set_capture: "Захват", set_iface: "Интерфейс", set_iface_auto: "автоматически (по маршруту в интернет)", set_iface_none: "список недоступен — Npcap не установлен",
+    set_filter: "Фильтр BPF", set_filter_ph: "например tcp port 443 or udp port 53 (пусто — весь трафик)", set_promisc: "Неразборчивый режим (видеть и чужой трафик сети)", set_verbose: "Подробный журнал",
+    set_dashboard: "Панель", set_host: "Адрес", set_host_hint: "127.0.0.1 — только этот компьютер; 0.0.0.0 — доступ из сети без пароля!", set_port: "Порт", set_port_auto: "8888 или следующий свободный",
+    set_network: "Сеть", set_egress: "Определять точку выхода в интернет (один запрос к cloudflare.com раз в 10 мин)",
+    set_app: "Приложение", set_autostart: "Запускать при входе в Windows", set_show_window: "Показывать окно при запуске (иначе — только значок в трее)", set_notify: "Уведомления Windows", nlevel_medium: "высокие и средние", nlevel_high: "только высокие", nlevel_off: "выключены",
+    set_geo: "Геоданные", set_geo_on: "базы загружены из {dir}", set_geo_off: "не найдены", set_active: "Сейчас работает", set_mode: "режим",
+    set_save: "Сохранить", set_saved: "Сохранено", set_restart_needed: "Чтобы изменения вступили в силу, нужен перезапуск.", set_restart_now: "Перезапустить сейчас", set_restarting: "перезапуск… страница обновится сама", set_restart_manual: "Перезапусти NetScope вручную.", set_restart_fail: "Перезапуск не удался: {e}",
+    set_loading: "загрузка настроек…", set_cli_note: "Запущено с параметрами командной строки — они имеют приоритет над файлом.",
+    alert_sensitive_http: "Незашифрованный HTTP {method} {url} передаёт: {data}",
+    alert_dns_long_name: "DNS-запрос {domain}: очень длинное имя ({value} симв.) — похоже на DNS-туннель",
+    alert_dns_long_label: "DNS-запрос {domain}: слишком длинная метка ({value} симв.)",
+    alert_dns_entropy: "DNS-запрос {domain}: случайная поддоменная метка «{value}» — возможна утечка данных",
+    alert_dns_rare_type: "DNS-запрос {domain}: редкий тип записи {value}",
+    alert_volume_spike: "Всплеск трафика к неизвестному хосту {host}: {rate} (обычно {baseline}), имя не встречалось ни в DNS, ни в SNI",
+    alert_cleartext_protocol: "Соединение {service} с {endpoint}: данные передаются без шифрования",
+    alert_new_process: "{process} впервые вышел в сеть",
+    alert_new_destination: "{process} впервые обратился к {destination}",
+    alert_new_country: "{process} впервые подключился к стране {country}",
+    alert_new_listener: "{process} начал слушать порт {port} ({address}) — доступен из сети",
+    alert_unsigned_process: "{process} ({path}) не подписан и ходит в сеть",
+    alert_unsigned_process_risky: "{process} не подписан, запущен из временной папки ({path}) и ходит в сеть",
+    alert_route_change: "Маршрут до {host} изменился: {before} → {after}",
+    alert_latency_increase: "Маршрут до {host} стал медленнее: {before_ms} мс → {after_ms} мс",
+    kind_sensitive_http: "Пароли/токены по HTTP", kind_suspicious_dns: "Подозрительный DNS", kind_volume_spike: "Всплеск трафика", kind_cleartext_protocol: "Незашифрованный протокол",
+    kind_new_process: "Новая программа в сети", kind_new_destination: "Новое направление", kind_new_country: "Новая страна", kind_new_listener: "Новый открытый порт", kind_unsigned_process: "Неподписанная программа", kind_route_change: "Смена маршрута", kind_latency_increase: "Рост задержки",
+  },
+  en: {
+    connecting: "connecting…", starting: "starting", live: "● live", replay: "replaying", finished: "finished", failed: "capture failed",
+    conn_live: "streaming", conn_polling: "reconnecting…", conn_offline: "server unreachable",
+    nav_overview: "Overview", nav_processes: "Processes", nav_connections: "Connections", nav_hosts: "Hosts", nav_map: "Map", nav_route: "Route", nav_dns: "DNS", nav_sockets: "OS sockets", nav_alerts: "Alerts",
+    side_iface: "Interface", side_geo: "Geolocation", on: "on", off: "off", side_uptime: "Uptime",
+    capture_stopped: "Capture stopped:", unknown_error: "unknown error", waiting: "waiting for data…", loading: "loading…", nothing: "nothing found",
+    k_download: "Download", k_upload: "Upload", k_procs: "Programs online", k_conns: "Connections", k_hosts: "Hosts", k_alerts: "Alerts",
+    total: "total", conn_no_proc: "conn. without process", open: "open", countries_n: "countries", sev_short: "{h} high · {m} med · {l} low",
+    path_title: "Network path", path_more: "details and tracing →", step_pc: "This computer", step_vpn: "VPN / proxy", step_exit: "Internet exit", step_dst: "Destinations",
+    exit_unknown: "could not determine: {e}", exit_pending: "checking…", exit_off: "check disabled", cf_sees: "Cloudflare sees you from {c}",
+    tunnel_note: "Capturing on a VPN tunnel interface: real site addresses are visible, not the VPN server.", tunnel_note2: " The tunnel itself goes to the VPN server over the physical adapter.",
+    top_procs: "Top programs by traffic", top_hosts: "Top destinations", countries: "Countries", recent_alerts: "Recent alerts", all: "all →", hosts_n: "hosts", no_data: "no data", no_ext: "no external addresses", geo_off: "geolocation disabled", quiet: "all quiet",
+    processes: "Processes", proc_hint: "click a program to see its connections", program: "Program", protocols: "Protocols", goes_to: "Talks to", connections: "Connections", received: "↓ Received", sent: "↑ Sent", share: "Share", activity: "Activity", signature: "Signature",
+    n_procs: "{n} processes", path_na: "path unavailable", no_proc_row: "No process", no_proc_hint: "— traffic of other LAN devices (mDNS, broadcast) or connections closed before the OS was polled",
+    attr_file: "Processes are unknown for a capture file: the traffic was recorded elsewhere.", attr_partial: "Processes are only partly known: {e}", no_attr_yet: "no connections with a known process yet…",
+    sig_signed: "signed", sig_unsigned: "unsigned", sig_invalid: "invalid signature", sig_unknown: "not checked", sig_pending: "checking…", risky_path: "runs from a temporary folder",
+    conns_title: "Connections", of: "of", filter_ph: "filter: chrome tls · process == Code.exe and country != RU · bytes > 1MB · rtt > 100ms", filter_help: "help", export_csv: "CSV", export_pcap: ".pcap",
+    process: "Process", protocol: "Protocol", local_sock: "Local socket", remote: "Remote", where: "Location", provider: "Provider", hops: "Hops", hops_tip: "routers to the host — from the TTL of received packets; behind a proxy/NGFW this is the distance to it", state: "State", who: "Who", rtt: "RTT", rtt_tip: "TCP handshake round trip", retrans: "Retr.", retrans_tip: "TCP retransmissions — a sign of loss", act: "Act.",
+    st_opening: "opening", st_established: "established", st_closing: "closing", st_closed: "closed", st_active: "active", dir_out: "↗ out", dir_in: "↙ in",
+    proc_chip: "process: {p}", proc_sockets: "process sockets →", unknown_proc: "unknown",
+    help_title: "Filter language", help_body: "Words match anywhere: <code>chrome tls</code>. Fields: <code>field == value</code>, operators <code>== != &gt; &lt; &gt;= &lt;= ~</code> (contains) <code>!~</code>, sets <code>country in {US, DE}</code>, logic <code>and or not ( )</code>, wildcards <code>ip == 140.82.*</code>, units <code>1MB 500KB 100ms 2s</code>. Examples: <code>process == Code.exe and country != RU</code> · <code>bytes &gt; 1MB and not signed</code> · <code>rtt &gt; 150ms or retrans &gt; 5</code> · <code>tls == \"TLS 1.2\"</code> · <code>doh</code>. Fields:",
+    filter_error: "error at position {p}: {m}",
+    hosts: "Hosts", hosts_hint: "click to see connections", host: "Host", host_ph: "name, IP, country, provider…", route_btn: "route", watch_btn: "watch", watching: "watched", lan: "LAN", spike_tip: "traffic spike to an unknown host",
+    map: "Map", map_hint: "circle = host (size ~ traffic); lines start at the internet exit", map_offline: "continent outlines did not load — points are drawn on a grid", map_egress: "internet exit", map_vpn: "VPN server", map_host: "host", map_anycast: "anycast/CDN",
+    route: "Route tracing", trace: "trace", retrace: "repeat", tracing: "tracing… (up to 10 s)", trace_probe: "sending probes with TTL 1…30 and waiting for router replies…", trace_pick: "pick an address and press “trace”", ip_ph: "IP address",
+    trace_to: "to", reached: "target reached", not_reached: "target did not answer", hops_n: "{n} hops", node: "Node", delay: "Delay", silent: "* * * no answer", private_net: "private network (router, VPN, company network)", border: "border {a}→{b}",
+    trace_note: "Tracing sends ICMP probes with growing TTL: each router replies “time exceeded”. Silent hops (* * *) are normal. With a VPN the first hops are inside the tunnel.",
+    vpn_conns: "VPN and proxy client connections", vpn_hint: "from the OS socket table", client: "Client", remote_addr: "Remote address",
+    watch_title: "Watched routes", watch_hint: "traced every {m} min; a path change or slowdown raises an alert", watch_add: "add", watch_none: "no watched hosts — press “watch” on a host or add an IP", watch_remove: "remove", last_run: "Last run", path: "Path", history: "History", changed: "path changed", next_run: "next in {s}",
+    dns: "DNS journal", dns_hint: "queries, answers and who used them", dns_ph: "domain, program, address, NXDOMAIN…", time: "Time", name: "Name", type: "Type", result: "Result", answers: "Answers", latency: "Latency", requester: "Asked by", used_by: "Connected", resolver: "Resolver",
+    dns_stats: "{q} queries · {f} failed", enc_dns: "Encrypted DNS", enc_dns_hint: "DoH/DoT/DoQ: these lookups are invisible in the journal", enc_none: "not detected",
+    sockets: "OS sockets", sockets_hint: "kernel TCP/UDP table with owners", sock_ph: "process, address, port, state…", local_addr: "Local address", sock_off: "not available for a capture file",
+    alerts: "Alerts", sev_high: "High", sev_medium: "Medium", sev_low: "Low", f_all: "All", f_high: "High", f_medium: "Medium", f_low: "Low", no_level: "no alerts of this level",
+    back: "← back", parent: "Parent", local_socket: "Local socket", remote_socket: "Remote socket", located: "Location", hops_to: "Hops to host", by_ttl: "by TTL; behind a proxy/NGFW — to it", who_opened: "Opened by", traffic: "Traffic", quality: "Link quality",
+    opened_local: "our side (outgoing)", opened_remote: "remote side (incoming)", opened_unknown: "opening not captured", os_closed: "already closed in the OS", not_in_table: "not found in the OS socket table",
+    rtt_hs: "handshake RTT", retrans_full: "retransmits ↑{o} ↓{i}", zero_win: "zero window ×{n}",
+    t_packets: "Packets", t_stream: "Stream", t_tls: "TLS", t_route: "Route to host", t_sockets: "Process sockets", this_conn: "← this connection", proc_unknown: "process unknown",
+    pkt_pick: "pick a packet to see its headers by layer and its bytes (↑/↓ to move)", pkt_parsing: "dissecting…", pkt_gone: "packet no longer stored", frame: "Frame", bytes: "bytes", sent_v: "sent", recv_v: "received", hover_hint: "hover a field to highlight its bytes", show_all: "show all {n} bytes", stored_of: "{a} of {b} frame bytes stored", kept_last: "last {n} packets kept; {d} earlier ones evicted",
+    no_packets: "packets of this connection were not stored", src: "Source", dst: "Destination", length: "Length", info: "Info", conn_gone: "Connection not found — it may have been evicted.",
+    stream_out: "↑ sent by us", stream_in: "↓ received", stream_bin: "binary data (hex)", stream_gap: "… {n} bytes missing (not captured) …", stream_enc: "Encrypted connection (TLS/QUIC): the handshake is visible, the payload is not without keys.", stream_none: "no payload (control packets only)", stream_trunc: "first 512 KB shown", stream_drop: "the start may be missing: {n} early packets were not kept", assembling: "reassembling…", packets_short: "pkt",
+    tls_client: "Client (ClientHello)", tls_server: "Server", ja4_tip: "JA4 — fingerprint of the client's TLS library: the same for all connections of one program", alpn: "ALPN", version: "Version", cipher: "Cipher", cert: "Certificate", issued_to: "Issued to", issued_by: "Issued by", valid_until: "Valid until", san: "Alternative names", self_signed: "self-signed", expired: "expired", tls13_certs: "TLS 1.3 sends the certificate encrypted — it is not visible on the wire.", tls_incomplete: "The start of the connection is no longer stored — the handshake cannot be read.", no_tls: "no TLS handshake captured",
+    route_to: "Route from this computer to {ip}", proto: "Proto",
+    notify_on: "🔔 notifications", notify_off: "🔕 notifications", notify_tip: "browser notifications for new alerts", notify_denied: "the browser blocked notifications",
+    ago_now: "now", s: "s", min: "min", h: "h", ms: "ms",
+    footer: "geodata: DB-IP Lite (CC BY 4.0) · map outlines: Natural Earth",
+    version: "version", serial: "Serial number", no_col: "No.", os_state: "in OS:", open_conns: "open",
+    method_icmp: "ICMP echo", method_tracert: "system tracert", method_traceroute: "system traceroute",
+    map_zoom_in: "zoom in", map_zoom_out: "zoom out", map_reset: "whole world", map_drag_hint: "mouse wheel to zoom, drag to pan, double-click to zoom in",
+    geo_hint: "Geolocation data not found. Download it from the NetScope tray icon menu (“Download geolocation data”) or with scripts/fetch-geoip.ps1.",
+    key_hint: "filter", api_error: "Request failed",
+    nav_settings: "Settings", settings: "Settings", set_file: "file", set_capture: "Capture", set_iface: "Interface", set_iface_auto: "automatic (the one with the internet route)", set_iface_none: "list unavailable — Npcap is not installed",
+    set_filter: "BPF filter", set_filter_ph: "e.g. tcp port 443 or udp port 53 (empty — all traffic)", set_promisc: "Promiscuous mode (see other devices' traffic too)", set_verbose: "Verbose log",
+    set_dashboard: "Dashboard", set_host: "Address", set_host_hint: "127.0.0.1 — this computer only; 0.0.0.0 — reachable from the network without a password!", set_port: "Port", set_port_auto: "8888 or the next free one",
+    set_network: "Network", set_egress: "Detect the internet exit point (one request to cloudflare.com every 10 min)",
+    set_app: "Application", set_autostart: "Start when I sign in to Windows", set_show_window: "Show the window at start (otherwise only the tray icon)", set_notify: "Windows notifications", nlevel_medium: "high and medium", nlevel_high: "high only", nlevel_off: "off",
+    set_geo: "Geolocation data", set_geo_on: "databases loaded from {dir}", set_geo_off: "not found", set_active: "Running now", set_mode: "mode",
+    set_save: "Save", set_saved: "Saved", set_restart_needed: "A restart is needed for the changes to take effect.", set_restart_now: "Restart now", set_restarting: "restarting… the page reloads by itself", set_restart_manual: "Restart NetScope by hand.", set_restart_fail: "Restart failed: {e}",
+    set_loading: "loading settings…", set_cli_note: "Started with command-line arguments — they take precedence over the file.",
+    alert_sensitive_http: "Unencrypted HTTP {method} {url} carries: {data}",
+    alert_dns_long_name: "DNS query {domain}: very long name ({value} chars) — looks like DNS tunneling",
+    alert_dns_long_label: "DNS query {domain}: oversized label ({value} chars)",
+    alert_dns_entropy: "DNS query {domain}: random-looking label “{value}” — possible data exfiltration",
+    alert_dns_rare_type: "DNS query {domain}: unusual record type {value}",
+    alert_volume_spike: "Traffic spike to unknown host {host}: {rate} (usually {baseline}), no DNS/SNI name seen for it",
+    alert_cleartext_protocol: "{service} connection to {endpoint} sends data unencrypted",
+    alert_new_process: "{process} used the network for the first time",
+    alert_new_destination: "{process} contacted {destination} for the first time",
+    alert_new_country: "{process} connected to a new country: {country}",
+    alert_new_listener: "{process} started listening on port {port} ({address}) — reachable from the network",
+    alert_unsigned_process: "{process} ({path}) is unsigned and uses the network",
+    alert_unsigned_process_risky: "{process} is unsigned, runs from a temporary folder ({path}) and uses the network",
+    alert_route_change: "Route to {host} changed: {before} → {after}",
+    alert_latency_increase: "Route to {host} got slower: {before_ms} ms → {after_ms} ms",
+    kind_sensitive_http: "Credentials over HTTP", kind_suspicious_dns: "Suspicious DNS", kind_volume_spike: "Traffic spike", kind_cleartext_protocol: "Cleartext protocol",
+    kind_new_process: "New program online", kind_new_destination: "New destination", kind_new_country: "New country", kind_new_listener: "New open port", kind_unsigned_process: "Unsigned program", kind_route_change: "Route change", kind_latency_increase: "Latency increase",
+  },
+};
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("netscope." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("netscope." + k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
+};
+const QUERY = new URLSearchParams(location.search);
+// Inside the NetScope program window (WebView2) the application itself shows Windows
+// notifications, and the browser Notification API is unavailable there.
+const IN_APP = QUERY.get("app") === "1";
+let LANG = QUERY.get("lang") || store.get("lang", (navigator.language || "ru").toLowerCase().startsWith("ru") ? "ru" : "en");
+if (!I18N[LANG]) LANG = "en";
+function t(key, vars) {
+  let s = (I18N[LANG] && I18N[LANG][key]) ?? I18N.en[key] ?? key;
+  if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] ?? m));
+  return s;
+}
+
+// ================= helpers =================
+
+const $ = (id) => document.getElementById(id);
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+// Everything from the network or the OS (names, paths, payloads) goes through esc().
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
+
+const PROTO = {
+  tls: ["#ebe9ff", "#5b21b6"], http: ["#e4ffc7", "#3f6212"], dns: ["#daeeff", "#1e40af"], quic: ["#dcf5f5", "#0f766e"],
+  tcp: ["#f3f2ff", "#4338ca"], udp: ["#e8f4ff", "#1d4ed8"], icmp: ["#fce0ff", "#a21caf"], other: ["#f1f2f4", "#4b5563"],
+};
+const SEV_CLASS = { high: "bg-red-100 text-red-800", medium: "bg-amber-100 text-amber-800", low: "bg-sky-100 text-sky-800" };
+const STATE_CLASS = { opening: "text-amber-700", established: "text-emerald-700", closing: "text-amber-700", closed: "text-slate-400", active: "text-emerald-700" };
+const SOURCE = { sni: "SNI", dns: "DNS", http: "Host" };
+
+function fmtBytes(b) {
+  const u = LANG === "ru" ? ["Б", "КБ", "МБ", "ГБ", "ТБ"] : ["B", "KB", "MB", "GB", "TB"];
+  let i = 0; b = Number(b) || 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i === 0 ? b.toFixed(0) : b < 10 ? b.toFixed(2) : b < 100 ? b.toFixed(1) : b.toFixed(0)) + " " + u[i];
+}
+const fmtRate = (b) => fmtBytes(b) + (LANG === "ru" ? "/с" : "/s");
+const fmtNum = (n) => Number(n || 0).toLocaleString(LANG === "ru" ? "ru-RU" : "en-US");
+const loc = () => (LANG === "ru" ? "ru-RU" : "en-GB");
+const clock = (ts) => new Date(ts * 1000).toLocaleTimeString(loc(), { hour12: false });
+const clockUs = (us) => new Date(us / 1000).toLocaleTimeString(loc(), { hour12: false }) + "." + String(Math.floor((us / 1000) % 1000)).padStart(3, "0");
+const fmtMs = (ms) => (ms === null || ms === undefined ? "" : (ms < 10 ? ms.toFixed(1) : ms.toFixed(0)) + " " + t("ms"));
+function ago(nowSec, ts) {
+  const d = Math.max(0, nowSec - ts);
+  if (d <= 1) return t("ago_now");
+  if (d < 60) return d + " " + t("s");
+  if (d < 3600) return Math.floor(d / 60) + " " + t("min");
+  return Math.floor(d / 3600) + " " + t("h");
+}
+function duration(s) {
+  s = Math.max(0, s | 0);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h ? `${h} ${t("h")} ${m} ${t("min")}` : m ? `${m} ${t("min")} ${sec} ${t("s")}` : `${sec} ${t("s")}`;
+}
+const chip = (p) => { const c = PROTO[p] || PROTO.other; return `<span class="chip" style="background:${c[0]};color:${c[1]}">${esc(p)}</span>`; };
+const cc = (code) => (code ? `<span class="cc">${esc(code)}</span>` : "");
+/** Country / city in the UI language (the backend sends English plus Russian when it differs). */
+const gName = (g, k) => (g ? (LANG === "ru" && g[k + "_ru"]) || g[k] : null);
+const placeText = (g) => (g ? [gName(g, "city"), gName(g, "country")].filter(Boolean).join(", ") : "");
+const countryName = (c) => (LANG === "ru" && c.name_ru) || c.name || c.code;
+function methodLabel(m) { const k = "method_" + m, s = t(k); return s === k ? esc(m) : s; }
+function geoLine(g, emptyHtml) {
+  if (!g) return emptyHtml ?? '<span class="text-slate-400">—</span>';
+  const place = esc(placeText(g));
+  const any = g.anycast ? ' <span class="chip bg-slate-100 text-slate-500" title="CDN/anycast">anycast</span>' : "";
+  return `${cc(g.country_code)} <span>${place}</span>${any}`;
+}
+const orgLine = (g) => (g && g.org ? `<span title="AS${g.asn || ""}">${esc(g.org)}</span>${g.asn ? ` <span class="text-slate-400">AS${g.asn}</span>` : ""}` : '<span class="text-slate-400">—</span>');
+const numOr = (v) => (v === null || v === undefined ? '<span class="text-slate-300">—</span>' : `<span class="num">${v}</span>`);
+const empty = (cols, text) => `<tr><td colspan="${cols}" class="py-10 text-center text-slate-400">${text}</td></tr>`;
+const procLabel = (p) => (p ? `<span class="font-medium">${esc(p.name)}</span> <span class="num text-[11px] text-slate-400">${p.pid}</span>` : `<span class="text-slate-400">${t("unknown_proc")}</span>`);
+const panel = (title, body, extra = "", right = "") => `<section class="panel ${extra}"><div class="panel-h"><h2>${title}</h2><div class="ml-auto flex flex-wrap items-center gap-2">${right}</div></div>${body}</section>`;
+const bar = (frac, color = "#2563eb") => `<div class="h-1.5 w-full overflow-hidden rounded bg-slate-100"><div class="h-full" style="width:${Math.max(0, Math.min(100, frac * 100))}%;background:${color}"></div></div>`;
+const stateLabel = (s) => `<span class="${STATE_CLASS[s] || ""}">${t("st_" + s)}</span>`;
+function sigBadge(p) {
+  const s = p.signature;
+  const risky = p.suspicious_path ? ` <span class="chip bg-red-100 text-red-800" title="${esc(t("risky_path"))}">temp</span>` : "";
+  if (!s) return `<span class="chip bg-slate-100 text-slate-500">${t("sig_pending")}</span>${risky}`;
+  const cls = { signed: "bg-emerald-50 text-emerald-700", unsigned: "bg-red-100 text-red-800", invalid: "bg-red-100 text-red-800", unknown: "bg-slate-100 text-slate-500" }[s.status];
+  return `<span class="chip ${cls}" title="${esc(s.signer || "")}">${t("sig_" + s.status)}</span>${s.signer ? ` <span class="text-[11px] text-slate-500">${esc(s.signer)}</span>` : ""}${risky}`;
+}
+function alertText(a) {
+  const d = {};
+  for (const [k, v] of Object.entries(a.details || {})) d[k] = esc(v);
+  if (a.kind === "volume_spike") { d.rate = fmtRate(Number(a.details.rate)); d.baseline = fmtRate(Number(a.details.baseline)); }
+  d.host = esc(a.host || "");
+  let key = "alert_" + a.kind;
+  if (a.kind === "suspicious_dns") key = "alert_dns_" + ((a.details && a.details.reason) || "");
+  if (a.kind === "unsigned_process" && a.details && a.details.risky_location === "true") key = "alert_unsigned_process_risky";
+  const s = t(key, d);
+  return s === key ? esc(a.message) : s;
+}
+async function getJson(url, method) {
+  const r = await fetch(url, { cache: "no-store", method: method || "GET" });
+  if (!r.ok) {
+    let body = await r.text();
+    try { body = JSON.parse(body); } catch (e) { /* plain text body */ }
+    // The API answers errors with {"error":{"code","message",…}}; show the message, keep the rest.
+    const env = body && typeof body === "object" && body.error && typeof body.error === "object" ? body.error : null;
+    const err = new Error(env ? env.message : typeof body === "string" ? body : JSON.stringify(body));
+    err.body = body; err.status = r.status; err.code = env ? env.code : null; err.detail = env;
+    throw err;
+  }
+  return r.json();
+}
+
+// ================= state & routing =================
+
+let last = null;
+let route = { name: "overview", params: {} };
+const ui = {
+  expanded: new Set(), connQuery: store.get("connQuery", ""), connError: null, hostQuery: "", sockQuery: "", dnsQuery: "", alertFilter: "all",
+  detail: null, detailTab: "packets", selected: null, packet: null, stream: null, hexAll: false, help: false,
+  traces: {}, tracing: {}, routeIp: "", watch: null, dnsData: null, fields: [],
+  notify: store.get("notify", false), notifiedUpTo: null,
+  // Map viewports per map (null = whole world), collapsed inspector layers, request sequencing.
+  mapViews: {}, mapDrag: null, renderPending: false, closedLayers: new Set(), seq: { detail: 0, packet: 0, conns: 0, dns: 0, watch: 0 },
+  // Settings page: what the server reported, the form as edited, the outcome of the last save.
+  settings: { data: null, interfaces: null, form: null, status: null, saving: false, restarting: false },
+};
+let pollTimer = null, connCache = null, sockCache = null, worldRings = null, worldFailed = false, connState = "offline";
+
+function parseRoute() {
+  const h = location.hash.replace(/^#\/?/, "");
+  const [path, query] = h.split("?");
+  const params = Object.fromEntries(new URLSearchParams(query || ""));
+  const parts = (path || "overview").split("/");
+  if (parts[0] === "conn" && parts[1]) return { name: "conn", params: { id: parts[1], ...params } };
+  return { name: parts[0] || "overview", params };
+}
+
+window.addEventListener("hashchange", () => {
+  const prev = route;
+  route = parseRoute();
+  if (route.name !== "conn" || prev.params.id !== route.params.id) Object.assign(ui, { detail: null, selected: null, packet: null, stream: null, detailTab: "packets", hexAll: false });
+  if (route.name === "route" && route.params.ip) ui.routeIp = route.params.ip;
+  if (route.name === "connections" && route.params.q !== undefined) { ui.connQuery = route.params.q; store.set("connQuery", ui.connQuery); }
+  renderView(true);
+});
+
+const ICONS = {
+  overview: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/>',
+  processes: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/>',
+  connections: '<path d="M4 7h11M4 7l3-3M4 7l3 3M20 17H9M20 17l-3-3M20 17l-3 3"/>',
+  hosts: '<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/>',
+  map: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',
+  route: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h6a4 4 0 0 0 0-8h-2a4 4 0 0 1 0-8h6"/>',
+  dns: '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/>',
+  sockets: '<path d="M8 3v5M16 3v5M5 8h14v4a7 7 0 0 1-14 0zM12 19v2"/>',
+  alerts: '<path d="M12 3l9 16H3zM12 10v4M12 17v.5"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+};
+const NAV = ["overview", "processes", "connections", "hosts", "map", "route", "dns", "sockets", "alerts", "settings"];
+
+function renderNav() {
+  const active = route.name === "conn" ? "connections" : route.name;
+  const counts = last ? { processes: last.processes.processes.length, connections: last.connection_count, hosts: last.host_count, alerts: last.alert_counts.total } : {};
+  const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
+  $("nav").innerHTML = NAV.map((k) => {
+    const n = counts[k];
+    const badge = n ? `<span class="num ml-auto text-[11px] ${k === "alerts" ? "rounded-full bg-red-100 px-1.5 text-red-700" : "text-slate-500"}">${fmtNum(n)}</span>` : "";
+    return `<a href="#/${k}" class="${active === k ? "on" : ""}" ${active === k ? 'aria-current="page"' : ""}>${icon(k)}${t("nav_" + k)}${badge}</a>`;
+  }).join("");
+  $("nav-m").innerHTML = NAV.map((k) => `<a href="#/${k}" class="${active === k ? "on" : ""}">${icon(k)}<span>${t("nav_" + k)}${k === "alerts" && counts.alerts ? ` <b class="text-red-600">${fmtNum(counts.alerts)}</b>` : ""}</span></a>`).join("");
+}
+
+function renderChrome() {
+  document.documentElement.lang = LANG;
+  $("lang").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.lang === LANG));
+  $("notify-btn").classList.toggle("hidden", IN_APP);
+  $("notify-btn").textContent = ui.notify ? t("notify_on") : t("notify_off");
+  $("notify-btn").title = t("notify_tip");
+  $("notify-btn").classList.toggle("btn-primary", ui.notify);
+  const ver = last && last.version ? ` · netscope ${t("version")} ${esc(last.version)}` : "";
+  // In the program window there is no Back button: raw API pages open in the browser instead.
+  const api = (p) => `<a href="${p}" ${IN_APP ? 'target="_blank" rel="noopener"' : ""}>${p}</a>`;
+  $("footer").innerHTML = `API: ${api("/api/stats")} · ${api("/api/connections")} · ${api("/api/dns")} · ${api("/api/netpath")} · ${api("/api/watch")} · /api/trace?ip= · WebSocket /api/ws · ${t("footer")}${ver} · <span class="kbd">/</span> ${t("key_hint")}`;
+  setConn(connState);
+  if (!last) { $("source").textContent = t("connecting"); $("status").textContent = t("starting"); }
+}
+
+function renderHeader(s) {
+  const c = s.capture;
+  $("source").innerHTML = `<span class="chip bg-slate-100 text-slate-600">${esc(c.mode)}</span> <span>${esc(c.description || c.source)}</span>${c.filter ? ` · BPF <span class="mono">${esc(c.filter)}</span>` : ""}`;
+  const st = c.status.state;
+  const v = { running: c.mode === "file" ? ["replay", "bg-sky-100 text-sky-800"] : ["live", "bg-emerald-100 text-emerald-800"], finished: ["finished", "bg-slate-100 text-slate-600"], failed: ["failed", "bg-red-100 text-red-800"] }[st] || ["starting", "bg-slate-100 text-slate-600"];
+  $("status").className = "chip " + v[1];
+  $("status").textContent = t(v[0]);
+  $("banner").classList.toggle("hidden", st !== "failed");
+  if (st === "failed") $("banner").innerHTML = `<b>${t("capture_stopped")}</b> ${esc(c.status.error || t("unknown_error"))}`;
+  const g = s.netpath.geo;
+  $("side-info").innerHTML = `<div>${t("side_iface")}:</div><div class="text-slate-600">${esc(s.netpath.interface)}</div>
+    <div class="mt-2">${t("side_geo")}: ${g && (g.city || g.asn) ? `<span class="text-emerald-600">${t("on")}</span>` : `<span class="text-amber-600" title="${esc(t("geo_hint"))}">${t("off")}</span>`}</div>
+    <div>${t("side_uptime")}: ${duration(s.uptime_secs)}</div>
+    ${s.version ? `<div>${t("version")} ${esc(s.version)}</div>` : ""}`;
+}
+
+function kpis(s) {
+  const tt = s.totals, r = s.rates, a = s.alert_counts;
+  const k = (label, value, sub, color = "") => `<div class="panel kpi px-4 py-3"><div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${label}</div><div class="v num ${color}">${value}</div><div class="num text-[12px] text-slate-500">${sub}</div></div>`;
+  return `<div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+    ${k(t("k_download"), fmtRate(r.bytes_in), fmtBytes(tt.bytes_in) + " " + t("total"), "text-sky-700")}
+    ${k(t("k_upload"), fmtRate(r.bytes_out), fmtBytes(tt.bytes_out) + " " + t("total"), "text-violet-700")}
+    ${k(t("k_procs"), fmtNum(s.processes.processes.length), fmtNum(s.processes.unattributed.connections) + " " + t("conn_no_proc"))}
+    ${k(t("k_conns"), fmtNum(s.connection_count), fmtNum(s.open_connections ?? s.connections.filter((c) => c.state !== "closed").length) + " " + t("open"))}
+    ${k(t("k_hosts"), fmtNum(s.host_count), fmtNum(s.netpath.countries.length) + " " + t("countries_n"))}
+    ${k(t("k_alerts"), fmtNum(a.total), t("sev_short", { h: a.high, m: a.medium, l: a.low }), a.high ? "text-red-600" : a.medium ? "text-amber-600" : "")}
+  </div>`;
+}
+
+// ================= network path =================
+
+function vpnTunnels(np) {
+  // CDN/anycast peers of a VPN client (push services, telemetry) are not its tunnel server.
+  return np.vpn.map((x) => ({ ...x, servers: x.servers.filter((s) => !(s.geo && s.geo.anycast)) })).filter((x) => x.servers.length);
+}
+
+function pathChain(np, compact) {
+  const box = (title, icon, body, tone = "bg-white") => `<div class="min-w-[200px] flex-1 rounded-lg border border-[#e3e6eb] ${tone} px-3 py-2"><div class="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">${icon} ${title}</div>${body}</div>`;
+  const pc = box(t("step_pc"), "🖥", `<div>${esc(np.interface)}</div><div class="mono text-[12px] text-slate-500">${np.local_ips.filter((x) => !x.startsWith("fe80")).map(esc).join(", ") || "—"}</div>`);
+  const tunnels = vpnTunnels(np);
+  const vpn = tunnels.length ? box(t("step_vpn"), "🔒", tunnels.map((x) => `<div class="mb-1"><span class="font-medium">${esc(x.process)}</span> <span class="num text-[11px] text-slate-400">pid ${x.pid}</span>
+      ${x.servers.slice(0, compact ? 1 : 4).map((sv) => `<div class="mono text-[12px]">${esc(sv.addr)} <span class="font-sans">${geoLine(sv.geo, "")}</span></div><div class="text-[11px] text-slate-500">${sv.geo && sv.geo.org ? esc(sv.geo.org) : ""}</div>`).join("")}</div>`).join(""), "bg-amber-50/60") : "";
+  let eg;
+  if (np.egress) {
+    const e = np.egress;
+    eg = box(t("step_exit"), "🌐", `<div class="mono text-[14px] font-semibold">${esc(e.ip)}</div><div>${geoLine(e.geo)}</div><div class="text-[12px] text-slate-500">${e.geo && e.geo.org ? esc(e.geo.org) : ""}${e.colo ? " · " + t("cf_sees", { c: esc(e.colo) }) : ""}</div>`, "bg-sky-50/60");
+  } else {
+    eg = box(t("step_exit"), "🌐", `<div class="text-slate-500">${np.egress_enabled ? (np.egress_error ? t("exit_unknown", { e: esc(np.egress_error) }) : t("exit_pending")) : t("exit_off")}</div>`);
+  }
+  const top = np.countries.slice(0, 4).map((c) => `${cc(c.code)} ${esc(countryName(c))}`).join(" ");
+  const dst = box(t("step_dst"), "🎯", `<div>${top || `<span class="text-slate-400">${t("no_data")}</span>`}</div><div class="text-[12px] text-slate-500">${np.countries.length} ${t("countries_n")}</div>`);
+  const arrow = '<div class="arrow">→</div>';
+  const note = np.interface_is_tunnel ? `<div class="mt-2 text-[12px] text-slate-500">${t("tunnel_note")}${tunnels.length ? t("tunnel_note2") : ""}</div>` : "";
+  return `<div class="flex flex-wrap items-stretch gap-2">${pc}${arrow}${vpn ? vpn + arrow : ""}${eg}${arrow}${dst}</div>${note}`;
+}
+
+// ================= overview =================
+
+function viewOverview(s) {
+  const procs = groupProcesses(s.processes.processes).slice(0, 6);
+  const maxP = Math.max(1, ...procs.map((g) => g.bytes_in + g.bytes_out));
+  const hosts = s.hosts.slice(0, 8);
+  const maxH = Math.max(1, ...hosts.map((h) => h.bytes_in + h.bytes_out));
+  const countries = s.netpath.countries.slice(0, 8);
+  const maxC = Math.max(1, ...countries.map((c) => c.bytes));
+  return `${kpis(s)}
+    ${panel(t("path_title"), `<div class="p-3">${pathChain(s.netpath, true)}</div>`, "mb-4", `<a href="#/route">${t("path_more")}</a>`)}
+    <div class="grid gap-4 xl:grid-cols-2">
+      ${panel(t("top_procs"), `<table class="grid-table"><tbody>${procs.map((g) => `<tr class="clickable" ${g.items.length === 1 ? `data-pid="${g.items[0].pid}"` : 'data-goto="#/processes"'}>
+          <td class="w-[40%]"><span class="font-medium">${esc(g.name)}</span>${g.items.length > 1 ? ` <span class="text-slate-400">×${g.items.length}</span>` : ""}</td>
+          <td class="w-[30%]">${bar((g.bytes_in + g.bytes_out) / maxP)}</td><td class="r num">${fmtBytes(g.bytes_in + g.bytes_out)}</td></tr>`).join("") || empty(3, t("no_data"))}</tbody></table>`, "", `<a href="#/processes">${t("all")}</a>`)}
+      ${panel(t("top_hosts"), `<table class="grid-table"><tbody>${hosts.map((h) => `<tr class="clickable" data-host="${esc(h.ip)}">
+          <td class="max-w-[220px] truncate"><span class="font-medium">${esc(h.name || h.ip)}</span></td><td class="whitespace-nowrap">${geoLine(h.geo)}</td>
+          <td class="w-[18%]">${bar((h.bytes_in + h.bytes_out) / maxH)}</td><td class="r num">${fmtBytes(h.bytes_in + h.bytes_out)}</td></tr>`).join("") || empty(4, t("no_data"))}</tbody></table>`, "", `<a href="#/hosts">${t("all")}</a>`)}
+      ${panel(t("countries"), `<table class="grid-table"><tbody>${countries.map((c) => `<tr><td class="w-[40%]">${cc(c.code)} ${esc(countryName(c))}</td><td class="num text-slate-500">${c.hosts} ${t("hosts_n")}</td>
+          <td class="w-[30%]">${bar(c.bytes / maxC, "#0ea5e9")}</td><td class="r num">${fmtBytes(c.bytes)}</td></tr>`).join("") || empty(4, s.netpath.geo ? t("no_ext") : t("geo_off"))}</tbody></table>`, "", `<a href="#/map">${t("nav_map")} →</a>`)}
+      ${panel(t("recent_alerts"), `<div class="divide-y divide-[#eef0f3]">${s.alerts.slice(0, 5).map(alertItem).join("") || `<div class="py-8 text-center text-slate-400">${t("quiet")}</div>`}</div>`, "", `<a href="#/alerts">${t("all")}</a>`)}
+    </div>`;
+}
+
+// ================= processes =================
+
+function groupProcesses(list) {
+  const groups = new Map();
+  for (const p of list) {
+    const g = groups.get(p.name) || { name: p.name, path: p.path, items: [], bytes_in: 0, bytes_out: 0, active: 0, total: 0, remotes: new Map(), protocols: new Set(), last_us: 0, sig: null };
+    g.items.push(p); g.bytes_in += p.bytes_in; g.bytes_out += p.bytes_out; g.active += p.connections_active; g.total += p.connections_total;
+    g.path = g.path || p.path; g.last_us = Math.max(g.last_us, p.last_us); g.sig = g.sig || p;
+    p.protocols.forEach((x) => g.protocols.add(x));
+    p.top_remotes.forEach((x, i) => g.remotes.set(x, (g.remotes.get(x) || 0) + 5 - i));
+    groups.set(p.name, g);
+  }
+  return [...groups.values()].sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out));
+}
+
+function viewProcesses(s) {
+  const pv = s.processes;
+  const list = groupProcesses(pv.processes);
+  const max = Math.max(1, ...list.map((g) => g.bytes_in + g.bytes_out));
+  let rows = "";
+  for (const g of list) {
+    const open = ui.expanded.has(g.name);
+    const single = g.items.length === 1 ? g.items[0] : null;
+    const remotes = [...g.remotes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map((x) => esc(x[0])).join(", ");
+    rows += `<tr class="clickable" ${single ? `data-pid="${single.pid}"` : `data-group="${esc(g.name)}"`}>
+      <td class="max-w-[360px]"><div class="flex items-center gap-2"><span class="w-3 text-slate-400">${single ? "" : open ? "▾" : "▸"}</span>
+        <div class="min-w-0"><div class="truncate"><span class="font-semibold">${esc(g.name)}</span> ${single ? `<span class="num text-[11px] text-slate-400">pid ${single.pid}</span>` : `<span class="text-[11px] text-slate-400">${t("n_procs", { n: g.items.length })}</span>`}</div>
+        <div class="mono truncate text-[11px] text-slate-400" title="${esc(g.path)}">${esc(g.path || t("path_na"))}</div></div></div></td>
+      <td class="max-w-[220px] truncate">${sigBadge(g.sig)}</td>
+      <td>${[...g.protocols].map(chip).join(" ")}</td>
+      <td class="max-w-[260px] truncate text-slate-600">${remotes || "—"}</td>
+      <td class="r num">${fmtNum(g.active)} <span class="text-slate-400">/ ${fmtNum(g.total)}</span></td>
+      <td class="r num text-sky-700">${fmtBytes(g.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(g.bytes_out)}</td>
+      <td class="w-24">${bar((g.bytes_in + g.bytes_out) / max)}</td>
+      <td class="r num text-slate-500">${ago(s.now, Math.floor(g.last_us / 1e6))}</td></tr>`;
+    if (!single && open) {
+      for (const p of g.items.sort((a, b) => (b.bytes_in + b.bytes_out) - (a.bytes_in + a.bytes_out))) {
+        rows += `<tr class="clickable bg-slate-50/60" data-pid="${p.pid}">
+          <td class="pl-10 text-[12px]"><span class="num">pid ${p.pid}</span> <span class="text-slate-400">← ${p.parent_name ? esc(p.parent_name) + " " : ""}${p.parent ? "pid " + p.parent : ""}</span></td><td></td>
+          <td>${p.protocols.map(chip).join(" ")}</td><td class="max-w-[260px] truncate text-[12px] text-slate-500">${p.top_remotes.slice(0, 3).map(esc).join(", ") || "—"}</td>
+          <td class="r num text-[12px]">${fmtNum(p.connections_active)} <span class="text-slate-400">/ ${fmtNum(p.connections_total)}</span></td>
+          <td class="r num text-[12px] text-sky-700">${fmtBytes(p.bytes_in)}</td><td class="r num text-[12px] text-violet-700">${fmtBytes(p.bytes_out)}</td><td></td>
+          <td class="r num text-[12px] text-slate-500">${ago(s.now, Math.floor(p.last_us / 1e6))}</td></tr>`;
+      }
+    }
+  }
+  if (pv.unattributed.connections) {
+    rows += `<tr class="clickable" data-pid="0"><td colspan="4" class="text-slate-500">${t("no_proc_row")} <span class="text-[11px] text-slate-400">${t("no_proc_hint")}</span></td>
+      <td class="r num">${fmtNum(pv.unattributed.connections)}</td><td class="r num text-sky-700">${fmtBytes(pv.unattributed.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(pv.unattributed.bytes_out)}</td><td></td><td></td></tr>`;
+  }
+  const note = !pv.attribution_enabled ? `<div class="border-b border-[#e3e6eb] bg-slate-50 px-4 py-2 text-slate-500">${t("attr_file")}</div>`
+    : pv.attribution_error ? `<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-amber-800">${t("attr_partial", { e: esc(pv.attribution_error) })}</div>` : "";
+  return kpis(s) + panel(`${t("processes")} <span class="sub">· ${t("proc_hint")}</span>`, `${note}<div class="scroll max-h-[70vh]"><table class="grid-table">
+    <thead><tr><th>${t("program")}</th><th>${t("signature")}</th><th>${t("protocols")}</th><th>${t("goes_to")}</th><th class="r">${t("connections")}</th><th class="r">${t("received")}</th><th class="r">${t("sent")}</th><th>${t("share")}</th><th class="r">${t("activity")}</th></tr></thead>
+    <tbody>${rows || empty(9, t("no_attr_yet"))}</tbody></table></div>`, "", `<a class="btn" href="/api/export/processes.csv">${t("export_csv")}</a>`);
+}
+
+// ================= connections =================
+
+function qualityCell(c) {
+  if (c.rtt_ms === null || c.rtt_ms === undefined) return '<span class="text-slate-300">—</span>';
+  const cls = c.rtt_ms > 250 ? "text-red-600" : c.rtt_ms > 100 ? "text-amber-600" : "text-emerald-700";
+  return `<span class="num ${cls}">${fmtMs(c.rtt_ms)}</span>`;
+}
+
+function connRows(list, nowSec) {
+  return list.map((c) => {
+    const init = c.initiated === "local" ? t("dir_out") : c.initiated === "remote" ? t("dir_in") : "—";
+    const retr = c.retrans_in + c.retrans_out;
+    const unsigned = c.signed === false ? ` <span class="chip bg-red-100 text-red-800">${t("sig_unsigned")}</span>` : "";
+    const doh = c.encrypted_dns ? ` <span class="chip bg-indigo-100 text-indigo-800">${c.encrypted_dns}</span>` : "";
+    return `<tr class="clickable" data-conn="${c.id}">
+      <td class="max-w-[180px] truncate">${procLabel(c.process)}${unsigned}</td>
+      <td class="whitespace-nowrap">${chip(c.app)} <span class="text-[10px] uppercase text-slate-400">${esc(c.l4)}</span>${doh}</td>
+      <td class="mono whitespace-nowrap text-[12px] text-slate-500">${esc(c.local)}</td>
+      <td class="max-w-[240px]"><div class="truncate font-medium">${esc(c.name || c.remote_ip)}</div><div class="mono truncate text-[11px] text-slate-500">${esc(c.remote)}</div></td>
+      <td class="whitespace-nowrap">${geoLine(c.geo)}</td>
+      <td class="max-w-[150px] truncate text-[12px] text-slate-600">${c.geo && c.geo.org ? esc(c.geo.org) : '<span class="text-slate-300">—</span>'}</td>
+      <td class="r">${numOr(c.hops)}</td><td class="r">${qualityCell(c)}</td>
+      <td class="r">${retr ? `<span class="num text-amber-700">${retr}</span>` : '<span class="text-slate-300">0</span>'}</td>
+      <td class="whitespace-nowrap text-[12px]">${stateLabel(c.state)}</td><td class="whitespace-nowrap text-[12px] text-slate-500">${init}</td>
+      <td class="r num text-sky-700">${fmtBytes(c.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(c.bytes_out)}</td>
+      <td class="r num text-slate-500">${ago(nowSec, Math.floor(c.last_us / 1e6))}</td></tr>`;
+  }).join("");
+}
+
+function connQs(extra = {}) {
+  const qs = new URLSearchParams();
+  if (route.params.pid !== undefined) qs.set("pid", route.params.pid);
+  if (ui.connQuery.trim()) qs.set("q", ui.connQuery.trim());
+  for (const [k, v] of Object.entries(extra)) qs.set(k, v);
+  return qs.toString();
+}
+
+function filterHelp() {
+  if (!ui.help) return "";
+  const fields = ui.fields.map((f) => `<code>${esc(f.name)}</code>${f.aliases.length ? `<span class="text-slate-400"> (${f.aliases.map(esc).join(", ")})</span>` : ""}`).join(", ");
+  return `<div class="help border-b border-[#eef0f3] bg-slate-50 px-4 py-2 text-[12px] leading-6"><b>${t("help_title")}.</b> ${t("help_body")} ${fields}</div>`;
+}
+
+function viewConnections(s) {
+  const pid = route.params.pid;
+  const filtered = pid !== undefined || ui.connQuery.trim();
+  const data = filtered ? connCache : { total: s.connection_count, connections: s.connections };
+  const pname = pid === "0" ? t("no_proc_row") : (s.processes.processes.find((p) => String(p.pid) === pid)?.name || "pid " + pid);
+  const pidChip = pid !== undefined ? `<a href="#/connections" class="chip bg-blue-50 text-blue-700" style="text-transform:none;font-size:12px;line-height:22px;text-decoration:none">${t("proc_chip", { p: esc(pname) + (pid !== "0" ? " · " + esc(pid) : "") })} ✕</a>` : "";
+  const err = ui.connError ? `<div class="border-b border-red-200 bg-red-50 px-4 py-1.5 text-[12px] text-red-700">${t("filter_error", { p: ui.connError.position + 1, m: esc(ui.connError.message) })}</div>` : "";
+  const tools = `<div class="flex flex-wrap items-center gap-2 border-b border-[#eef0f3] px-3 py-2">
+      <input id="conn-q" class="input mono min-w-[300px] flex-1 ${ui.connError ? "bad" : ui.connQuery.trim() ? "good" : ""}" value="${esc(ui.connQuery)}" placeholder="${esc(t("filter_ph"))}" autocomplete="off" spellcheck="false">
+      <button class="btn" id="help-btn">${t("filter_help")}</button>
+      <a class="btn" href="/api/export/connections.csv?${connQs()}">${t("export_csv")}</a><a class="btn" href="/api/export/connections.pcap?${connQs()}">${t("export_pcap")}</a></div>`;
+  const right = `${pidChip}${pid && pid !== "0" ? `<a href="#/sockets?pid=${esc(pid)}" class="text-[12px]">${t("proc_sockets")}</a>` : ""}`;
+  return panel(`${t("conns_title")} <span class="sub">· ${data ? `${fmtNum(data.connections.length)} ${t("of")} ${fmtNum(data.total)}` : t("loading")}</span>`,
+    `${tools}${err}${filterHelp()}<div class="scroll max-h-[74vh]"><table class="grid-table"><thead><tr><th>${t("process")}</th><th>${t("protocol")}</th><th>${t("local_sock")}</th><th>${t("remote")}</th><th>${t("where")}</th><th>${t("provider")}</th><th class="r" title="${esc(t("hops_tip"))}">${t("hops")}</th><th class="r" title="${esc(t("rtt_tip"))}">${t("rtt")}</th><th class="r" title="${esc(t("retrans_tip"))}">${t("retrans")}</th><th>${t("state")}</th><th>${t("who")}</th><th class="r">↓</th><th class="r">↑</th><th class="r">${t("act")}</th></tr></thead>
+    <tbody>${data ? connRows(data.connections, s.now) || empty(14, t("nothing")) : empty(14, t("loading"))}</tbody></table></div>`, "", right);
+}
+
+async function refreshConnections() {
+  if (route.params.pid === undefined && !ui.connQuery.trim()) return;
+  const seq = ++ui.seq.conns;
+  let data = null, error = null;
+  try { data = await getJson("/api/connections?" + connQs({ limit: 500 })); }
+  catch (e) { if (e.code === "filter") error = e.detail; else console.error(e); }
+  if (seq !== ui.seq.conns) return; // a newer query is already in flight
+  if (data) { connCache = data; ui.connError = null; } else if (error) { ui.connError = error; connCache = { total: 0, connections: [] }; }
+  if (route.name === "connections") renderView();
+}
+
+// ================= hosts =================
+
+function viewHosts(s) {
+  const q = ui.hostQuery.trim().toLowerCase();
+  const list = s.hosts.filter((h) => !q || h.ip.includes(q) || (h.name || "").toLowerCase().includes(q) || JSON.stringify(h.geo || {}).toLowerCase().includes(q));
+  const top = Math.max(1, ...s.hosts.map((h) => h.bytes_in + h.bytes_out));
+  const watched = new Set((ui.watch ? ui.watch.targets : []).map((x) => x.ip));
+  const rows = list.map((h) => `<tr class="clickable" data-host="${esc(h.ip)}">
+      <td class="max-w-[260px]"><div class="truncate font-medium">${h.flagged ? `<span class="text-red-600" title="${esc(t("spike_tip"))}">⚠</span> ` : ""}${esc(h.name || h.ip)}${h.name_source ? ` <span class="chip bg-slate-100 text-slate-500">${SOURCE[h.name_source] || esc(h.name_source)}</span>` : ""}</div><div class="mono text-[11px] text-slate-500">${esc(h.ip)}${h.scope === "local" ? " · " + t("lan") : ""}</div></td>
+      <td class="whitespace-nowrap">${geoLine(h.geo)}</td><td class="max-w-[200px] truncate text-[12px]">${orgLine(h.geo)}</td>
+      <td class="r">${numOr(h.hops)}</td><td class="r">${qualityCell(h)}</td><td>${h.protocols.map(chip).join(" ")}</td>
+      <td class="r num text-sky-700">${fmtBytes(h.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(h.bytes_out)}</td>
+      <td class="w-20">${bar((h.bytes_in + h.bytes_out) / top)}</td><td class="r num text-slate-500">${ago(s.now, h.last_seen)}</td>
+      <td class="r whitespace-nowrap">${h.scope === "local" ? "" : `<button class="btn" data-trace-goto="${esc(h.ip)}">${t("route_btn")}</button> ${watched.has(h.ip) ? `<span class="chip bg-emerald-50 text-emerald-700">${t("watching")}</span>` : `<button class="btn" data-watch-add="${esc(h.ip)}" data-label="${esc(h.name || "")}">${t("watch_btn")}</button>`}`}</td></tr>`).join("");
+  return panel(`${t("hosts")} <span class="sub">· ${fmtNum(list.length)} · ${t("hosts_hint")}</span>`, `<div class="scroll max-h-[78vh]"><table class="grid-table">
+      <thead><tr><th>${t("host")}</th><th>${t("where")}</th><th>${t("provider")}</th><th class="r" title="${esc(t("hops_tip"))}">${t("hops")}</th><th class="r" title="${esc(t("rtt_tip"))}">${t("rtt")}</th><th>${t("protocols")}</th><th class="r">↓</th><th class="r">↑</th><th>${t("share")}</th><th class="r">${t("act")}</th><th></th></tr></thead>
+      <tbody>${rows || empty(11, t("waiting"))}</tbody></table></div>`, "",
+    `<input id="host-q" type="search" class="input w-64" value="${esc(ui.hostQuery)}" placeholder="${esc(t("host_ph"))}" autocomplete="off"><a class="btn" href="/api/export/hosts.csv">${t("export_csv")}</a>`);
+}
+
+// ================= map =================
+
+async function loadWorld() {
+  if (worldRings || worldFailed || loadWorld.pending) return;
+  loadWorld.pending = true;
+  try {
+    const r = await fetch("/static/land-110m.json");
+    worldRings = decodeTopo(await r.json());
+  } catch (e) { worldFailed = true; }
+  loadWorld.pending = false;
+  if (route.name === "map" || route.name === "route" || route.name === "conn") renderView();
+}
+
+/** TopoJSON → rings of [lon, lat] (delta-encoded quantized arcs). */
+function decodeTopo(topo) {
+  const [sx, sy] = topo.transform.scale, [tx, ty] = topo.transform.translate;
+  const arcs = topo.arcs.map((arc) => { let x = 0, y = 0; return arc.map(([dx, dy]) => { x += dx; y += dy; return [x * sx + tx, y * sy + ty]; }); });
+  const arcPts = (i) => (i >= 0 ? arcs[i] : arcs[~i].slice().reverse());
+  const rings = [];
+  const poly = (p) => p.forEach((ring) => { const pts = []; ring.forEach((i) => { const a = arcPts(i); pts.push(...(pts.length ? a.slice(1) : a)); }); rings.push(pts); });
+  const walk = (g) => { if (g.type === "GeometryCollection") g.geometries.forEach(walk); else if (g.type === "Polygon") poly(g.arcs); else if (g.type === "MultiPolygon") g.arcs.forEach(poly); };
+  Object.values(topo.objects).forEach(walk);
+  return rings;
+}
+
+const MAP_W = 1000, MAP_H = 470, LAT_TOP = 84, LAT_BOTTOM = -58;
+const proj = (lon, lat) => [((lon + 180) / 360) * MAP_W, ((LAT_TOP - lat) / (LAT_TOP - LAT_BOTTOM)) * MAP_H];
+const hasCoords = (g) => g && g.lat !== null && g.lat !== undefined && g.lon !== null && g.lon !== undefined;
+
+// ----- zoomable map -----
+// The viewport is an SVG viewBox kept in ui.mapViews[key] (null = whole world). Wheel,
+// drag, pinch, double-click and the +/−/⟲ buttons change it in place (applyMapView), so
+// the periodic re-render only has to draw the same viewport again.
+const MAP_MAX_ZOOM = 40, MAP_LABEL_ZOOM = 2.5;
+let landPath = null;
+function worldPath() {
+  // Rings crossing the antimeridian jump from +180 to -180: start a new subpath there
+  // instead of drawing a line across the whole map.
+  if (landPath === null && worldRings) landPath = worldRings.map((r) => r.map(([lo, la], i) => (i === 0 || Math.abs(lo - r[i - 1][0]) > 180 ? "M" : "L") + proj(lo, la).map((v) => v.toFixed(1)).join(",")).join("")).join("");
+  return landPath || "";
+}
+const mapView = (key) => ui.mapViews[key] || { x: 0, y: 0, w: MAP_W, h: MAP_H };
+const mapZoom = (key) => MAP_W / mapView(key).w;
+function clampView(v) {
+  const w = Math.min(MAP_W, Math.max(MAP_W / MAP_MAX_ZOOM, v.w)), h = w * MAP_H / MAP_W;
+  return { x: Math.min(MAP_W - w, Math.max(0, v.x)), y: Math.min(MAP_H - h, Math.max(0, v.y)), w, h };
+}
+/** Zooms by `factor` keeping the map point under (fx, fy) (fractions of the viewport) still. */
+function zoomView(key, factor, fx = 0.5, fy = 0.5) {
+  const v = mapView(key), w = v.w * factor, h = v.h * factor;
+  const nv = clampView({ x: v.x + fx * (v.w - w), y: v.y + fy * (v.h - h), w, h });
+  ui.mapViews[key] = nv.w >= MAP_W - 0.01 ? null : nv;
+}
+function panView(key, dx, dy) {
+  const v = mapView(key);
+  ui.mapViews[key] = clampView({ x: v.x + dx, y: v.y + dy, w: v.w, h: v.h });
+}
+/** Re-applies the stored viewport to a rendered map without rebuilding the page. */
+function applyMapView(wrap) {
+  const key = wrap.dataset.map, v = mapView(key), k = mapZoom(key);
+  const svg = wrap.querySelector("svg");
+  svg.setAttribute("viewBox", `${v.x.toFixed(2)} ${v.y.toFixed(2)} ${v.w.toFixed(2)} ${v.h.toFixed(2)}`);
+  // Dots shrink slower than the map grows, so they stay visible but stop covering cities.
+  svg.querySelectorAll("circle[data-r]").forEach((c) => c.setAttribute("r", (Number(c.dataset.r) / Math.sqrt(k)).toFixed(2)));
+  svg.querySelectorAll(".map-label").forEach((l) => { l.setAttribute("font-size", (11 / k).toFixed(2)); l.style.display = k >= MAP_LABEL_ZOOM || l.dataset.always ? "" : "none"; });
+  const z = wrap.querySelector(".map-zoom");
+  if (z) z.textContent = "×" + (k < 10 ? k.toFixed(1) : k.toFixed(0));
+}
+function worldSvg(points, lines, extra = "", key = "world") {
+  const v = mapView(key), k = mapZoom(key);
+  let grid = "";
+  for (let lo = -150; lo <= 180; lo += 30) { const [x] = proj(lo, 0); grid += `M${x.toFixed(1)},0V${MAP_H}`; }
+  for (let la = -60; la <= 60; la += 30) { const [, y] = proj(0, la); grid += `M0,${y.toFixed(1)}H${MAP_W}`; }
+  const ln = lines.map(([a, b, color]) => { const [x1, y1] = proj(a.lon, a.lat), [x2, y2] = proj(b.lon, b.lat); return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="1" stroke-opacity=".35"/>`; }).join("");
+  const pts = points.map((p) => { const [x, y] = proj(p.lon, p.lat); return `<circle class="map-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(Number(p.r) / Math.sqrt(k)).toFixed(2)}" data-r="${p.r}" fill="${p.color}" fill-opacity=".75" stroke="#fff" stroke-width="1" ${p.attr || ""}><title>${esc(p.title)}</title></circle>`; }).join("");
+  // Labels appear once zoomed in (the biggest 80 by dot size, to stay readable).
+  const labelled = points.filter((p) => p.label && p.always).concat(points.filter((p) => p.label && !p.always).sort((a, b) => Number(b.r) - Number(a.r)).slice(0, 80));
+  const labels = labelled.map((p) => { const [x, y] = proj(p.lon, p.lat); return `<text class="map-label" x="${(x + Number(p.r) / Math.sqrt(k) + 2 / k).toFixed(1)}" y="${(y + 4 / k).toFixed(1)}" font-size="${(11 / k).toFixed(2)}" ${p.always ? 'data-always="1"' : ""} style="${k >= MAP_LABEL_ZOOM || p.always ? "" : "display:none"}">${esc(p.label)}</text>`; }).join("");
+  const btn = (z, label, text) => `<button type="button" data-map-zoom="${z}" title="${esc(label)}" aria-label="${esc(label)}">${text}</button>`;
+  return `<div class="map-wrap" data-map="${key}" title="${esc(t("map_drag_hint"))}"><svg class="map-svg" viewBox="${v.x.toFixed(2)} ${v.y.toFixed(2)} ${v.w.toFixed(2)} ${v.h.toFixed(2)}" preserveAspectRatio="xMidYMid meet" aria-label="map"><rect x="0" y="0" width="${MAP_W}" height="${MAP_H}" fill="#f8fafc"/><path class="map-grid" d="${grid}"/><path class="map-land" d="${worldPath()}"/>${ln}${extra}${pts}${labels}</svg>
+    <div class="map-ctl">${btn("in", t("map_zoom_in"), "+")}${btn("out", t("map_zoom_out"), "−")}${btn("reset", t("map_reset"), "⟲")}</div><div class="map-zoom">×${k < 10 ? k.toFixed(1) : k.toFixed(0)}</div></div>`;
+}
+
+// Map interaction: wheel zoom at the cursor, drag to pan, pinch on touch screens.
+function mapPointer(ev, wrap) {
+  const r = wrap.querySelector("svg").getBoundingClientRect();
+  return { fx: (ev.clientX - r.left) / r.width, fy: (ev.clientY - r.top) / r.height, rect: r };
+}
+$("view").addEventListener("wheel", (ev) => {
+  const wrap = ev.target.closest && ev.target.closest(".map-wrap");
+  if (!wrap) return;
+  ev.preventDefault();
+  const { fx, fy } = mapPointer(ev, wrap);
+  zoomView(wrap.dataset.map, ev.deltaY < 0 ? 0.8 : 1.25, fx, fy);
+  applyMapView(wrap);
+}, { passive: false });
+$("view").addEventListener("dblclick", (ev) => {
+  const wrap = ev.target.closest && ev.target.closest(".map-wrap");
+  if (!wrap || ev.target.closest(".map-ctl")) return;
+  const { fx, fy } = mapPointer(ev, wrap);
+  zoomView(wrap.dataset.map, 0.5, fx, fy);
+  applyMapView(wrap);
+});
+$("view").addEventListener("pointerdown", (ev) => {
+  const wrap = ev.target.closest && ev.target.closest(".map-wrap");
+  if (!wrap || ev.target.closest(".map-ctl") || (ev.pointerType === "mouse" && ev.button !== 0)) return;
+  const d = ui.mapDrag && ui.mapDrag.wrap === wrap ? ui.mapDrag : { wrap, key: wrap.dataset.map, pointers: new Map(), moved: false };
+  d.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  d.start = mapView(d.key);
+  d.origin = [...d.pointers.values()];
+  ui.mapDrag = d;
+  wrap.querySelector("svg").classList.add("dragging");
+  try { wrap.setPointerCapture(ev.pointerId); } catch (e) { /* not supported */ }
+});
+$("view").addEventListener("pointermove", (ev) => {
+  const d = ui.mapDrag;
+  if (!d || !d.pointers.has(ev.pointerId)) return;
+  d.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  const now = [...d.pointers.values()], rect = d.wrap.querySelector("svg").getBoundingClientRect();
+  const unit = d.start.w / rect.width; // map units per CSS pixel at drag start
+  if (now.length >= 2 && d.origin.length >= 2) {
+    // Pinch: scale by the change of distance, keep the midpoint still.
+    const dist = (p) => Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+    const scale = dist(d.origin) / Math.max(1, dist(now));
+    const mid0 = { x: (d.origin[0].x + d.origin[1].x) / 2, y: (d.origin[0].y + d.origin[1].y) / 2 }, mid = { x: (now[0].x + now[1].x) / 2, y: (now[0].y + now[1].y) / 2 };
+    const w = d.start.w * scale, h = d.start.h * scale;
+    const mx = d.start.x + (mid0.x - rect.left) * unit, my = d.start.y + (mid0.y - rect.top) * unit;
+    const nv = clampView({ x: mx - (mid.x - rect.left) / rect.width * w, y: my - (mid.y - rect.top) / rect.height * h, w, h });
+    ui.mapViews[d.key] = nv.w >= MAP_W - 0.01 ? null : nv;
+  } else {
+    const dx = (now[0].x - d.origin[0].x), dy = (now[0].y - d.origin[0].y);
+    if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
+    ui.mapViews[d.key] = clampView({ x: d.start.x - dx * unit, y: d.start.y - dy * unit, w: d.start.w, h: d.start.h });
+  }
+  applyMapView(d.wrap);
+});
+function mapDragEnd(ev) {
+  const d = ui.mapDrag;
+  if (!d || !d.pointers.has(ev.pointerId)) return;
+  d.pointers.delete(ev.pointerId);
+  if (d.pointers.size) { d.start = mapView(d.key); d.origin = [...d.pointers.values()]; return; }
+  d.wrap.querySelector("svg").classList.remove("dragging");
+  ui.mapDrag = null;
+  // A drag must not count as a click on the dot under the pointer (on touch screens the
+  // click can arrive a task later, so a one-shot capturing listener eats it, not a timer).
+  if (d.moved) {
+    const swallow = (ev2) => { if (ev2.target.closest && ev2.target.closest(".map-wrap")) { ev2.stopPropagation(); ev2.preventDefault(); } };
+    document.addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener("click", swallow, { capture: true }), 500);
+  }
+  // Renders postponed during the drag (see renderView).
+  if (ui.renderPending) { ui.renderPending = false; renderView(); }
+}
+$("view").addEventListener("pointerup", mapDragEnd);
+$("view").addEventListener("pointercancel", mapDragEnd);
+
+function viewMap(s) {
+  loadWorld();
+  const np = s.netpath;
+  const eg = np.egress && hasCoords(np.egress.geo) ? np.egress.geo : null;
+  const max = Math.max(1, ...s.hosts.map((h) => h.bytes_in + h.bytes_out));
+  const points = [], lines = [];
+  for (const h of s.hosts) {
+    const g = h.geo;
+    if (!hasCoords(g)) continue;
+    const total = h.bytes_in + h.bytes_out;
+    const color = g.anycast ? "#94a3b8" : "#2563eb";
+    points.push({ lat: g.lat, lon: g.lon, r: (3 + 14 * Math.sqrt(total / max)).toFixed(1), color, title: `${h.name || h.ip}\n${placeText(g)}\n${g.org || ""}\n${fmtBytes(total)}`, attr: `data-host="${esc(h.ip)}"`, label: h.name || h.ip });
+    if (eg) lines.push([eg, g, color]);
+  }
+  for (const x of vpnTunnels(np)) for (const sv of x.servers) if (hasCoords(sv.geo)) points.push({ lat: sv.geo.lat, lon: sv.geo.lon, r: 7, color: "#f59e0b", title: `${t("map_vpn")}: ${sv.addr}\n${x.process}`, label: `VPN · ${x.process}`, always: true });
+  if (eg) points.push({ lat: eg.lat, lon: eg.lon, r: 8, color: "#16a34a", title: `${t("map_egress")}: ${np.egress.ip}\n${placeText(eg)}`, label: `${t("map_egress")} · ${placeText(eg) || np.egress.ip}`, always: true });
+  const dot = (c) => `<span class="inline-block h-2.5 w-2.5 rounded-full" style="background:${c}"></span>`;
+  const legend = `<div class="flex flex-wrap gap-4 px-4 py-2 text-[12px] text-slate-500"><span>${dot("#16a34a")} ${t("map_egress")}</span><span>${dot("#f59e0b")} ${t("map_vpn")}</span><span>${dot("#2563eb")} ${t("map_host")}</span><span>${dot("#94a3b8")} ${t("map_anycast")}</span><span class="ml-auto">${t("map_drag_hint")}</span>${worldFailed ? `<span class="text-amber-700">${t("map_offline")}</span>` : ""}</div>`;
+  const maxC = Math.max(1, ...np.countries.map((c) => c.bytes));
+  return `${panel(`${t("map")} <span class="sub">· ${t("map_hint")}</span>`, worldSvg(points, lines) + legend, "mb-4")}
+    ${panel(t("countries"), `<table class="grid-table"><tbody>${np.countries.map((c) => `<tr><td>${cc(c.code)} ${esc(countryName(c))}</td><td class="r num text-slate-500">${c.hosts} ${t("hosts_n")}</td><td class="w-1/3">${bar(c.bytes / maxC, "#0ea5e9")}</td><td class="r num">${fmtBytes(c.bytes)}</td></tr>`).join("") || empty(4, np.geo ? t("no_ext") : t("geo_off"))}</tbody></table>`)}`;
+}
+
+// ================= route, tracing, watch =================
+
+function traceMap(tr) {
+  const pts = (tr.hops || []).filter((h) => hasCoords(h.geo));
+  if (!pts.length) return "";
+  loadWorld();
+  const path = pts.map((h, i) => { const [x, y] = proj(h.geo.lon, h.geo.lat); return (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1); }).join("");
+  const points = pts.map((h) => ({ lat: h.geo.lat, lon: h.geo.lon, r: 5, color: h.ip === tr.target ? "#16a34a" : "#2563eb", title: `#${h.ttl} ${h.ip}\n${h.geo.org || ""}\n${placeText(h.geo)}`, label: `#${h.ttl} ${placeText(h.geo) || h.ip}` }));
+  return `<div class="border-b border-[#eef0f3]">${worldSvg(points, [], `<path d="${path}" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="5 4"/>`, "trace")}</div>`;
+}
+
+function traceTable(tr) {
+  if (tr.error) return `<div class="px-4 py-6 text-center text-red-700">${esc(tr.error)}</div>`;
+  const maxRtt = Math.max(1, ...tr.hops.flatMap((h) => h.rtt_ms.filter((x) => x !== null)));
+  let prev = null;
+  const rows = tr.hops.map((h) => {
+    const rtts = h.rtt_ms.filter((x) => x !== null);
+    const best = rtts.length ? Math.min(...rtts) : null;
+    const c = h.geo && h.geo.country_code;
+    const border = c && prev && c !== prev ? `<span class="chip bg-amber-100 text-amber-800">${t("border", { a: esc(prev), b: esc(c) })}</span>` : "";
+    if (c) prev = c;
+    const dot = !h.ip ? "#cbd5e1" : h.private ? "#f59e0b" : h.ip === tr.target ? "#16a34a" : "#2563eb";
+    return `<tr><td class="relative w-10"><div class="hopline"></div><div class="relative z-[1] mx-auto flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-white" style="background:${dot}">${h.ttl}</div></td>
+      <td>${h.ip ? `<div class="mono font-medium">${esc(h.ip)}</div><div class="truncate text-[11px] text-slate-500">${esc(h.name || "")}</div>` : `<span class="text-slate-400">${t("silent")}</span>`}</td>
+      <td class="w-48">${best !== null ? `<div class="num text-[12px]">${h.rtt_ms.map((x) => (x === null ? "*" : x.toFixed(0) + " " + t("ms"))).join(" · ")}</div>${bar(best / maxRtt, "#10b981")}` : ""}</td>
+      <td class="max-w-[220px] truncate text-[12px]">${h.private ? `<span class="text-amber-700">${t("private_net")}</span>` : orgLine(h.geo)}</td>
+      <td class="whitespace-nowrap">${h.private ? "" : geoLine(h.geo)} ${border}</td></tr>`;
+  }).join("");
+  return `${traceMap(tr)}<div class="flex flex-wrap gap-4 border-b border-[#eef0f3] px-4 py-2 text-[12px] text-slate-500"><span>${t("trace_to")} <span class="mono text-slate-800">${esc(tr.target)}</span></span><span>${tr.reached ? `<span class="text-emerald-700">${t("reached")}</span>` : `<span class="text-amber-700">${t("not_reached")}</span>`}</span><span>${t("hops_n", { n: tr.hops.length })}</span><span>${(tr.duration_ms / 1000).toFixed(1)} ${t("s")}</span><span>${methodLabel(tr.method)}</span></div>
+    <table class="grid-table"><thead><tr><th></th><th>${t("node")}</th><th>${t("delay")}</th><th>${t("provider")}</th><th>${t("where")}</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function runTrace(ip, fresh) {
+  if (!ip || ui.tracing[ip]) return;
+  ui.tracing[ip] = true;
+  renderView();
+  try { ui.traces[ip] = await getJson(`/api/trace?ip=${encodeURIComponent(ip)}${fresh ? "&fresh=true" : ""}`); }
+  catch (e) { ui.traces[ip] = { error: String(e.message || e), hops: [] }; }
+  delete ui.tracing[ip];
+  renderView();
+}
+
+function traceBlock(ip) {
+  const tr = ui.traces[ip], busy = ui.tracing[ip];
+  const btn = `<button class="btn btn-primary" data-trace="${esc(ip || "")}" ${busy || !ip ? "disabled" : ""}>${busy ? t("tracing") : tr ? t("retrace") : t("trace")}</button>`;
+  return { btn, body: busy && !tr ? `<div class="px-4 py-8 text-center text-slate-500">${t("trace_probe")}</div>` : tr ? traceTable(tr) : `<div class="px-4 py-8 text-center text-slate-400">${t("trace_pick")}</div>` };
+}
+
+async function refreshWatch() {
+  const seq = ++ui.seq.watch;
+  try { const w = await getJson("/api/watch"); if (seq === ui.seq.watch) ui.watch = w; } catch (e) { console.error(e); }
+  if (seq === ui.seq.watch && (route.name === "route" || route.name === "hosts")) renderView();
+}
+
+async function watchChange(method, ip, label) {
+  const qs = `ip=${encodeURIComponent(ip)}${label ? "&label=" + encodeURIComponent(label) : ""}`;
+  // A slow poll must not resurrect a row removed here: this response is the newest.
+  const seq = ++ui.seq.watch;
+  try { const w = await getJson(`/api/watch?${qs}`, method); if (seq === ui.seq.watch) ui.watch = w; } catch (e) { console.error(e); }
+  renderView();
+}
+
+function viewWatch(s) {
+  const w = ui.watch;
+  const rows = (w ? w.targets : []).map((x) => {
+    const h = x.history[0];
+    const changed = x.history.some((y) => y.changed);
+    const hist = x.history.slice(0, 24).reverse().map((y) => `<span title="${esc(new Date(y.ts * 1000).toLocaleString(loc()))}: ${esc(y.path.join(" › "))} ${y.rtt_ms ? fmtMs(y.rtt_ms) : ""}" class="inline-block h-3 w-1.5 rounded-sm ${y.changed ? "bg-amber-500" : y.reached ? "bg-emerald-500" : "bg-slate-300"}"></span>`).join(" ");
+    return `<tr><td><div class="mono font-medium">${esc(x.ip)}</div><div class="text-[11px] text-slate-500">${esc(x.label || "")}</div></td>
+      <td class="text-[12px]">${h ? `${new Date(h.ts * 1000).toLocaleTimeString(loc(), { hour12: false })} · ${t("hops_n", { n: h.hops })} · ${h.rtt_ms ? fmtMs(h.rtt_ms) : "—"}` : x.running ? t("tracing") : "—"}<div class="text-[11px] text-slate-400">${t("next_run", { s: duration(Math.max(0, x.next_run - Date.now() / 1000)) })}</div></td>
+      <td class="max-w-[360px] text-[12px]">${h ? esc(h.path.join(" › ")) : ""}${changed ? ` <span class="chip bg-amber-100 text-amber-800">${t("changed")}</span>` : ""}</td>
+      <td>${hist}</td>
+      <td class="r whitespace-nowrap"><button class="btn" data-trace-goto="${esc(x.ip)}">${t("route_btn")}</button> <button class="btn" data-watch-remove="${esc(x.ip)}">${t("watch_remove")}</button></td></tr>`;
+  }).join("");
+  return panel(`${t("watch_title")} <span class="sub">· ${t("watch_hint", { m: w ? Math.round(w.interval_secs / 60) : 10 })}</span>`,
+    `<table class="grid-table"><thead><tr><th>${t("host")}</th><th>${t("last_run")}</th><th>${t("path")}</th><th>${t("history")}</th><th></th></tr></thead><tbody>${rows || empty(5, t("watch_none"))}</tbody></table>`, "mb-4",
+    `<input id="watch-ip" class="input mono w-44" placeholder="${esc(t("ip_ph"))}"><button class="btn" id="watch-add">${t("watch_add")}</button>`);
+}
+
+function viewRoute(s) {
+  const options = s.hosts.filter((h) => h.scope !== "local").slice(0, 40).map((h) => `<option value="${esc(h.ip)}">${esc(h.name ? h.name + " — " + h.ip : h.ip)}</option>`).join("");
+  const ip = ui.routeIp;
+  const tb = traceBlock(ip);
+  const vpnRows = s.netpath.vpn.map((x) => x.servers.map((sv) => `<tr><td><span class="font-medium">${esc(x.process)}</span> <span class="num text-[11px] text-slate-400">${x.pid}</span></td>
+      <td class="mono">${esc(sv.addr)}</td><td class="text-[12px] text-slate-500">${esc(sv.state || "")}</td><td>${geoLine(sv.geo)}</td><td class="text-[12px]">${orgLine(sv.geo)}</td>
+      <td class="r"><button class="btn" data-trace-goto="${esc(sv.addr.replace(/:\d+$/, "").replace(/^\[|\]$/g, ""))}">${t("route_btn")}</button></td></tr>`).join("")).join("");
+  return `${panel(t("path_title"), `<div class="p-3">${pathChain(s.netpath, false)}</div>`, "mb-4")}
+    ${viewWatch(s)}
+    ${s.netpath.vpn.length ? panel(`${t("vpn_conns")} <span class="sub">· ${t("vpn_hint")}</span>`, `<table class="grid-table"><thead><tr><th>${t("client")}</th><th>${t("remote_addr")}</th><th>${t("state")}</th><th>${t("where")}</th><th>${t("provider")}</th><th></th></tr></thead><tbody>${vpnRows}</tbody></table>`, "mb-4") : ""}
+    ${panel(t("route"), tb.body, "", `<input id="route-ip" class="input mono w-48" list="route-hosts" placeholder="${esc(t("ip_ph"))}" value="${esc(ip)}"><datalist id="route-hosts">${options}</datalist>${tb.btn}${ip ? `<button class="btn" data-watch-add="${esc(ip)}">${t("watch_btn")}</button>` : ""}`)}
+    <div class="mt-2 text-[12px] text-slate-500">${t("trace_note")}</div>`;
+}
+
+// ================= DNS =================
+
+async function refreshDns() {
+  const seq = ++ui.seq.dns, q = ui.dnsQuery.trim();
+  try { const d = await getJson("/api/dns?limit=500" + (q ? "&q=" + encodeURIComponent(q) : "")); if (seq === ui.seq.dns) ui.dnsData = d; } catch (e) { console.error(e); }
+  if (route.name === "dns" && seq === ui.seq.dns) renderView();
+}
+
+function viewDns() {
+  const d = ui.dnsData;
+  const rcodeCls = (r) => (r === "NOERROR" ? "text-emerald-700" : r ? "text-red-600" : "text-slate-400");
+  const dash = '<span class="text-slate-300">—</span>';
+  const rows = d ? d.entries.map((e) => `<tr>
+      <td class="num whitespace-nowrap text-[12px] text-slate-500">${clockUs(e.ts_us)}</td>
+      <td class="max-w-[300px]"><div class="mono truncate font-medium" title="${esc(e.name)}">${esc(e.name)}</div></td>
+      <td class="text-[12px]">${esc(e.qtype)}</td><td class="text-[12px] ${rcodeCls(e.rcode)}">${esc(e.rcode || "…")}</td>
+      <td class="mono max-w-[220px] truncate text-[12px]" title="${esc(e.answers.join(", "))}">${e.answers.map(esc).join(", ") || dash}</td>
+      <td class="r">${e.latency_ms !== null ? `<span class="num">${fmtMs(e.latency_ms)}</span>` : dash}</td>
+      <td class="text-[12px]">${e.requester ? esc(e.requester.name) : dash}</td>
+      <td class="max-w-[200px] truncate text-[12px]">${e.used_by.map(esc).join(", ") || dash}</td>
+      <td class="mono text-[11px] text-slate-500">${esc(e.resolver)} · ${esc(e.transport)}</td></tr>`).join("") : "";
+  const enc = d ? d.encrypted.map((c) => `<tr class="clickable" data-conn="${c.id}"><td>${procLabel(c.process)}</td><td><span class="chip bg-indigo-100 text-indigo-800">${esc(c.encrypted_dns)}</span></td><td class="mono text-[12px]">${esc(c.remote)}</td><td class="text-[12px]">${esc(c.name || "")}</td><td class="r num">${fmtBytes(c.bytes_in + c.bytes_out)}</td></tr>`).join("") : "";
+  return `${panel(`${t("enc_dns")} <span class="sub">· ${t("enc_dns_hint")}</span>`, `<table class="grid-table"><tbody>${enc || empty(5, d ? t("enc_none") : t("loading"))}</tbody></table>`, "mb-4")}
+    ${panel(`${t("dns")} <span class="sub">· ${t("dns_hint")}${d ? " · " + t("dns_stats", { q: fmtNum(d.queries), f: fmtNum(d.failures) }) : ""}</span>`,
+      `<div class="scroll max-h-[70vh]"><table class="grid-table"><thead><tr><th>${t("time")}</th><th>${t("name")}</th><th>${t("type")}</th><th>${t("result")}</th><th>${t("answers")}</th><th class="r">${t("latency")}</th><th>${t("requester")}</th><th>${t("used_by")}</th><th>${t("resolver")}</th></tr></thead>
+      <tbody>${d ? rows || empty(9, t("nothing")) : empty(9, t("loading"))}</tbody></table></div>`, "",
+      `<input id="dns-q" type="search" class="input w-72" value="${esc(ui.dnsQuery)}" placeholder="${esc(t("dns_ph"))}" autocomplete="off"><a class="btn" href="/api/export/dns.csv${ui.dnsQuery.trim() ? "?q=" + encodeURIComponent(ui.dnsQuery.trim()) : ""}">${t("export_csv")}</a>`)}`;
+}
+
+// ================= OS sockets =================
+
+function viewSockets() {
+  const pid = route.params.pid;
+  const q = ui.sockQuery.trim().toLowerCase();
+  let list = sockCache ? sockCache.sockets : [];
+  if (q) list = list.filter((x) => (x.process || "").toLowerCase().includes(q) || x.local.includes(q) || (x.remote || "").includes(q) || String(x.pid) === q || (x.state || "").toLowerCase().includes(q));
+  const rows = list.slice(0, 3000).map((x) => `<tr class="${x.pid ? "clickable" : ""}" data-sockpid="${x.pid}">
+      <td>${x.process ? `<span class="font-medium">${esc(x.process)}</span>` : '<span class="text-slate-400">—</span>'} <span class="num text-[11px] text-slate-400">${x.pid}</span></td>
+      <td class="text-[11px] uppercase text-slate-500">${esc(x.proto)}</td><td class="mono text-[12px]">${esc(x.local)}</td><td class="mono text-[12px]">${esc(x.remote || "—")}</td>
+      <td class="text-[12px] ${x.state === "ESTABLISHED" ? "text-emerald-700" : x.state === "LISTEN" ? "text-sky-700" : "text-slate-400"}">${esc(x.state || "")}</td></tr>`).join("");
+  const off = sockCache && !sockCache.enabled;
+  const pidChip = pid ? `<a href="#/sockets" class="chip bg-blue-50 text-blue-700" style="text-transform:none;font-size:12px;line-height:22px;text-decoration:none">pid ${esc(pid)} ✕</a>` : "";
+  return panel(`${t("sockets")} <span class="sub">· ${t("sockets_hint")} · ${fmtNum(list.length)}</span>`,
+    `${sockCache && sockCache.error ? `<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-amber-800">${esc(sockCache.error)}</div>` : ""}<div class="scroll max-h-[78vh]"><table class="grid-table">
+    <thead><tr><th>${t("process")}</th><th>${t("proto")}</th><th>${t("local_addr")}</th><th>${t("remote_addr")}</th><th>${t("state")}</th></tr></thead>
+    <tbody>${off ? empty(5, t("sock_off")) : rows || empty(5, sockCache ? t("nothing") : t("loading"))}</tbody></table></div>`, "",
+    `${pidChip}<input id="sock-q" type="search" class="input w-64" value="${esc(ui.sockQuery)}" placeholder="${esc(t("sock_ph"))}" autocomplete="off">`);
+}
+
+async function refreshSockets() {
+  try { sockCache = await getJson("/api/sockets" + (route.params.pid ? "?pid=" + encodeURIComponent(route.params.pid) : "")); } catch (e) { console.error(e); }
+  if (route.name === "sockets") renderView();
+}
+
+// ================= alerts =================
+
+function alertItem(a) {
+  const target = a.host ? `data-host="${esc(a.host)}"` : a.details && a.details.process ? `data-procname="${esc(a.details.process)}"` : "";
+  return `<div class="clickable cursor-pointer px-4 py-2 hover:bg-slate-50" ${target}>
+    <div class="flex items-center gap-2 text-[12px]"><span class="chip ${SEV_CLASS[a.severity] || SEV_CLASS.low}">${t("sev_" + a.severity)}</span><span class="font-medium">${t("kind_" + a.kind)}</span><span class="num ml-auto text-slate-400">${clock(a.ts)}</span></div>
+    <div class="mt-0.5 break-words">${alertText(a)}</div>${a.host ? `<div class="mono text-[11px] text-slate-400">${esc(a.host)}${a.name ? " · " + esc(a.name) : ""}</div>` : ""}</div>`;
+}
+
+function viewAlerts(s) {
+  const c = s.alert_counts;
+  const tabs = [["all", c.total], ["high", c.high], ["medium", c.medium], ["low", c.low]];
+  const items = s.alerts.filter((a) => ui.alertFilter === "all" || a.severity === ui.alertFilter);
+  return panel(t("alerts"), `<div class="divide-y divide-[#eef0f3]">${items.map(alertItem).join("") || `<div class="py-10 text-center text-slate-400">${s.alerts.length ? t("no_level") : t("quiet")}</div>`}</div>`, "",
+    tabs.map(([k, n]) => `<button class="btn ${ui.alertFilter === k ? "btn-primary" : ""}" data-filter="${k}">${t("f_" + k)} <span class="num opacity-70">${n}</span></button>`).join(""));
+}
+
+// ================= settings =================
+
+async function loadSettings() {
+  const st = ui.settings;
+  try {
+    const d = await getJson("/api/settings");
+    st.data = d;
+    const v = d.values;
+    st.form = { port: v.port === null ? "" : String(v.port), host: v.host || "127.0.0.1", interface: v.interface || "", filter: v.filter || "", promiscuous: !!v.promiscuous, verbose: !!v.verbose, egress_check: !!v.egress_check, show_window: !!v.show_window, notifications: v.notifications || "medium", autostart: d.autostart };
+  } catch (e) { st.status = { error: String(e.message || e) }; }
+  if (route.name === "settings") renderView();
+  if (st.interfaces === null) {
+    try { st.interfaces = await getJson("/api/interfaces"); } catch (e) { st.interfaces = []; }
+    if (route.name === "settings") renderView();
+  }
+}
+
+async function saveSettings() {
+  const st = ui.settings, f = st.form;
+  if (!f || st.saving) return;
+  st.saving = true; st.status = null; renderView();
+  const body = { port: f.port.trim() === "" ? null : Number(f.port), port_auto: f.port.trim() === "", host: f.host.trim(), interface: f.interface, filter: f.filter.trim(), promiscuous: f.promiscuous, verbose: f.verbose, egress_check: f.egress_check, show_window: f.show_window, notifications: f.notifications };
+  if (st.data && st.data.autostart !== null && st.data.autostart !== undefined) body.autostart = !!f.autostart;
+  try {
+    const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error && j.error.message ? j.error.message : r.statusText);
+    st.status = { saved: true, restart: !!j.restart_required };
+    st.saving = false;
+    await loadSettings();
+  } catch (e) { st.status = { error: String(e.message || e) }; st.saving = false; renderView(); }
+}
+
+async function restartNow() {
+  const st = ui.settings;
+  st.restarting = true; renderView();
+  try {
+    const r = await fetch("/api/restart", { method: "POST" });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error && j.error.message ? j.error.message : r.statusText); }
+  } catch (e) { st.restarting = false; st.status = { error: t("set_restart_fail", { e: String(e.message || e) }) }; renderView(); return; }
+  // The server goes away for a moment; come back when it answers again (the desktop
+  // app navigates the window itself if the port changed).
+  const until = Date.now() + 30000;
+  const probe = async () => {
+    if (Date.now() > until) { st.restarting = false; renderView(); return; }
+    try { const r = await fetch("/api/health", { cache: "no-store" }); if (r.ok) { location.reload(); return; } } catch (e) { /* still restarting */ }
+    setTimeout(probe, 700);
+  };
+  setTimeout(probe, 1500);
+}
+
+function viewSettings() {
+  const st = ui.settings, d = st.data, f = st.form;
+  if (!d || !f) return panel(t("settings"), `<div class="py-10 text-center text-slate-400">${st.status && st.status.error ? esc(st.status.error) : t("set_loading")}</div>`);
+  const field = (label, control, hint = "") => `<label class="block"><div class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">${label}</div>${control}${hint ? `<div class="mt-1 text-[11px] text-slate-500">${hint}</div>` : ""}</label>`;
+  const check = (id, label, on) => `<label class="flex items-center gap-2 py-1"><input type="checkbox" id="${id}" ${on ? "checked" : ""}> <span>${label}</span></label>`;
+  const section = (title, body) => `<div class="panel p-4"><div class="mb-3 font-semibold">${title}</div><div class="space-y-3">${body}</div></div>`;
+  const ifaces = st.interfaces;
+  const ifaceOptions = ifaces === null ? `<option value="">${t("loading")}</option>` : `<option value="">${t("set_iface_auto")}</option>` + ifaces.map((i) => `<option value="${esc(i.name)}" ${f.interface === i.name ? "selected" : ""}>${esc(i.description || i.name)}${i.addresses.length ? " — " + esc(i.addresses.filter((a) => !a.startsWith("fe80")).slice(0, 2).join(", ")) : ""}${i.default ? " ★" : ""}</option>`).join("");
+  const ifaceHint = ifaces !== null && !ifaces.length ? `<span class="text-amber-700">${t("set_iface_none")}</span>` : "";
+  // A chosen interface that is not in the list (file edited by hand, adapter gone) stays selectable.
+  const extra = f.interface && ifaces && !ifaces.some((i) => i.name === f.interface) ? `<option value="${esc(f.interface)}" selected>${esc(f.interface)}</option>` : "";
+  const capture = section(t("set_capture"), `${field(t("set_iface"), `<select id="set-interface" class="input w-full">${ifaceOptions}${extra}</select>`, ifaceHint)}
+    ${field(t("set_filter"), `<input id="set-filter" class="input mono w-full" value="${esc(f.filter)}" placeholder="${esc(t("set_filter_ph"))}" spellcheck="false">`)}
+    ${check("set-promiscuous", t("set_promisc"), f.promiscuous)}${check("set-verbose", t("set_verbose"), f.verbose)}`);
+  const hostOptions = ["127.0.0.1", "localhost", "::1", "0.0.0.0", "::"].map((h) => `<option value="${h}" ${f.host === h ? "selected" : ""}>${h}</option>`).join("") + (["127.0.0.1", "localhost", "::1", "0.0.0.0", "::"].includes(f.host) ? "" : `<option value="${esc(f.host)}" selected>${esc(f.host)}</option>`);
+  const dashboard = section(t("set_dashboard"), `<div class="grid grid-cols-2 gap-3">${field(t("set_host"), `<select id="set-host" class="input mono w-full">${hostOptions}</select>`)}
+    ${field(t("set_port"), `<input id="set-port" class="input mono w-full" type="number" min="1" max="65535" value="${esc(f.port)}" placeholder="${esc(t("set_port_auto"))}">`)}</div>
+    <div class="text-[11px] ${f.host === "0.0.0.0" || f.host === "::" ? "text-red-600" : "text-slate-500"}">${t("set_host_hint")}</div>`);
+  const network = section(t("set_network"), check("set-egress", t("set_egress"), f.egress_check));
+  const notifyOptions = ["medium", "high", "off"].map((k) => `<option value="${k}" ${f.notifications === k ? "selected" : ""}>${t("nlevel_" + k)}</option>`).join("");
+  const appSection = section(t("set_app"), `${d.autostart !== null && d.autostart !== undefined ? check("set-autostart", t("set_autostart"), f.autostart) : ""}${check("set-show-window", t("set_show_window"), f.show_window)}
+    ${field(t("set_notify"), `<select id="set-notifications" class="input w-full">${notifyOptions}</select>`)}`);
+  const g = d.geoip || {};
+  const geo = section(t("set_geo"), `<div>${g.enabled ? `<span class="text-emerald-700">${t("set_geo_on", { dir: `<span class="mono">${esc(g.dir || "")}</span>` })}</span>` : `<span class="text-amber-700">${t("set_geo_off")}</span><div class="mt-1 text-[12px] text-slate-500">${t("geo_hint")}</div>`}</div>`);
+  const a = d.active || {};
+  const active = section(t("set_active"), `<table class="grid-table text-[12px]"><tbody>
+    <tr><td class="w-32 text-slate-500">${t("set_iface")}</td><td>${esc(a.interface_description || a.interface || "—")}${a.interface_description ? ` <span class="mono text-slate-400">${esc(a.interface)}</span>` : ""}</td></tr>
+    <tr><td class="text-slate-500">${t("set_dashboard")}</td><td class="mono">${esc(a.host || "")}:${esc(a.port || "")}</td></tr>
+    <tr><td class="text-slate-500">${t("set_mode")}</td><td>${esc(a.mode || "")}</td></tr>
+    <tr><td class="text-slate-500">${t("set_file")}</td><td class="mono break-all">${esc(d.file || "—")}</td></tr></tbody></table>${d.from_cli ? `<div class="mt-2 text-[12px] text-amber-700">${t("set_cli_note")}</div>` : ""}`);
+  let status = "";
+  if (st.restarting) status = `<span class="text-slate-500">${t("set_restarting")}</span>`;
+  else if (st.status && st.status.error) status = `<span class="text-red-600">${esc(st.status.error)}</span>`;
+  else if (st.status && st.status.saved) status = `<span class="text-emerald-700">${t("set_saved")}.</span>${st.status.restart ? ` <span class="text-amber-700">${t("set_restart_needed")}</span> ${d.can_restart ? `<button class="btn btn-primary" id="set-restart">${t("set_restart_now")}</button>` : `<span class="text-slate-500">${t("set_restart_manual")}</span>`}` : ""}`;
+  const bar = `<div class="flex flex-wrap items-center gap-3 border-t border-[#eef0f3] px-4 py-3"><button class="btn btn-primary" id="set-save" ${st.saving ? "disabled" : ""}>${t("set_save")}</button><div class="text-[12px]">${status}</div></div>`;
+  return panel(t("settings"), `<div class="grid gap-4 p-4 xl:grid-cols-2">${capture}${dashboard}${network}${appSection}${geo}${active}</div>${bar}`);
+}
+
+// ================= connection detail =================
+
+const fact = (k, v) => `<div class="min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${k}</div><div class="mt-0.5 break-words">${v}</div></div>`;
+
+function viewConnection() {
+  const d = ui.detail;
+  if (!d) return panel(t("conns_title"), `<div class="py-10 text-center text-slate-400">${t("loading")}</div>`);
+  if (d.error) return panel(t("conns_title"), `<div class="py-10 text-center text-slate-500">${esc(d.error)} <a href="#/connections">${t("back")}</a></div>`);
+  const c = d.conn, p = c.process;
+  const dur = (c.last_us - c.first_us) / 1e6;
+  const init = c.initiated === "local" ? t("opened_local") : c.initiated === "remote" ? t("opened_remote") : t("opened_unknown");
+  const retr = c.retrans_in + c.retrans_out;
+  const parts = [];
+  if (c.rtt_ms !== null) parts.push(`${t("rtt_hs")} ${qualityCell(c)}`);
+  if (retr) parts.push(`<span class="text-amber-700">${t("retrans_full", { o: c.retrans_out, i: c.retrans_in })}</span>`);
+  if (c.zero_window) parts.push(`<span class="text-red-600">${t("zero_win", { n: c.zero_window })}</span>`);
+  const head = `<div class="panel mb-4">
+    <div class="panel-h"><a href="${p ? "#/connections?pid=" + p.pid : "#/connections"}" style="text-decoration:none">${t("back")}</a>
+      <h2 class="text-[15px]">${p ? esc(p.name) : t("unknown_proc")} <span class="text-slate-400">→</span> ${esc(c.name || c.remote_ip)}</h2>${chip(c.app)}<span class="text-[11px] uppercase text-slate-400">${esc(c.l4)}</span>${stateLabel(c.state)}
+      <div class="ml-auto"><a class="btn" href="/api/connections/${c.id}/pcap">${t("export_pcap")}</a></div></div>
+    <div class="grid gap-4 px-4 py-3 sm:grid-cols-2 xl:grid-cols-4">
+      ${fact(t("process"), p ? `${procLabel(p)}<div class="mono text-[11px] text-slate-500">${esc(p.path || t("path_na"))}</div>` : `<span class="text-slate-500">${t("not_in_table")}</span>`)}
+      ${fact(t("parent"), p && p.parent ? `${esc(p.parent_name || "?")} <span class="num text-[11px] text-slate-400">${p.parent}</span>` : "—")}
+      ${fact(t("local_socket"), `<span class="mono">${esc(c.local)}</span> ${d.os_state ? `<span class="chip bg-emerald-50 text-emerald-700">${t("os_state")} ${esc(d.os_state)}</span>` : `<span class="text-[11px] text-slate-400">${t("os_closed")}</span>`}`)}
+      ${fact(t("remote_socket"), `<span class="mono">${esc(c.remote)}</span>${c.name ? `<div class="text-[12px] text-slate-500">${esc(c.name)}</div>` : ""}`)}
+      ${fact(t("located"), `${geoLine(c.geo)}<div class="text-[12px]">${orgLine(c.geo)}</div>`)}
+      ${fact(t("quality"), `${parts.join(" · ") || "—"}<div class="text-[11px] text-slate-500">${t("hops_to")}: ${c.hops ?? "—"} (${t("by_ttl")})</div>`)}
+      ${fact(t("who_opened"), init)}
+      ${fact(t("traffic"), `<span class="num text-violet-700">↑ ${fmtBytes(c.bytes_out)}</span> <span class="text-[11px] text-slate-400">${fmtNum(c.packets_out)} ${t("packets_short")}</span> · <span class="num text-sky-700">↓ ${fmtBytes(c.bytes_in)}</span> <span class="text-[11px] text-slate-400">${fmtNum(c.packets_in)} ${t("packets_short")}</span><div class="text-[11px] text-slate-500">${clockUs(c.first_us)} → ${clockUs(c.last_us)} (${dur < 60 ? dur.toFixed(2) + " " + t("s") : duration(dur)})</div>`)}
+    </div></div>`;
+  const tab = (k, label) => `<button role="tab" aria-selected="${ui.detailTab === k}" data-dtab="${k}" class="border-b-2 px-3 py-2 ${ui.detailTab === k ? "border-blue-600 font-semibold text-blue-700" : "border-transparent text-slate-500 hover:text-slate-800"}">${label}</button>`;
+  const tabs = `<div role="tablist" class="flex flex-wrap border-b border-[#e3e6eb] px-2">${tab("packets", `${t("t_packets")} <span class="num text-slate-400">${d.packets.length}</span>`)}${tab("stream", t("t_stream"))}${c.tls || d.tls_server ? tab("tls", t("t_tls")) : ""}${tab("route", t("t_route"))}${tab("sockets", `${t("t_sockets")} <span class="num text-slate-400">${d.sockets.length}</span>`)}</div>`;
+  let body;
+  if (ui.detailTab === "packets") body = viewPackets(d);
+  else if (ui.detailTab === "stream") body = viewStream();
+  else if (ui.detailTab === "tls") body = viewTls(d);
+  else if (ui.detailTab === "route") { const tb = traceBlock(c.remote_ip); body = `<div class="flex items-center gap-2 border-b border-[#eef0f3] px-4 py-2 text-[12px] text-slate-500">${t("route_to", { ip: `<span class="mono text-slate-800">${esc(c.remote_ip)}</span>` })}<span class="ml-auto flex gap-2">${tb.btn}<button class="btn" data-watch-add="${esc(c.remote_ip)}" data-label="${esc(c.name || "")}">${t("watch_btn")}</button></span></div>${tb.body}`; }
+  else body = `<table class="grid-table"><thead><tr><th>${t("proto")}</th><th>${t("local_addr")}</th><th>${t("remote_addr")}</th><th>${t("state")}</th></tr></thead><tbody>${d.sockets.map((x) => `<tr class="${x.current ? "bg-blue-50" : ""}"><td class="text-[11px] uppercase">${esc(x.proto)}</td><td class="mono text-[12px]">${esc(x.local)}</td><td class="mono text-[12px]">${esc(x.remote || "—")}</td><td class="text-[12px]">${esc(x.state || "")}${x.current ? ` <b class="text-blue-700">${t("this_conn")}</b>` : ""}</td></tr>`).join("") || empty(4, t("proc_unknown"))}</tbody></table>`;
+  return head + `<section class="panel">${tabs}${body}</section>`;
+}
+
+function viewTls(d) {
+  const c = d.conn.tls, s = d.tls_server;
+  const row = (k, v) => (v ? `<tr><td class="w-48 text-slate-500">${k}</td><td class="mono break-all">${v}</td></tr>` : "");
+  const client = c ? `<table class="grid-table"><tbody>${row("SNI", esc(c.sni || "—"))}${row(t("version"), esc(c.version))}${row(t("alpn"), esc(c.alpn.join(", ") || "—"))}${row(`JA4 <span title="${esc(t("ja4_tip"))}">ⓘ</span>`, esc(c.ja4))}</tbody></table>` : `<div class="px-4 py-3 text-slate-400">${t("no_tls")}</div>`;
+  let server = `<div class="px-4 py-3 text-slate-400">${t("no_tls")}</div>`;
+  if (s) {
+    const nowSec = Date.now() / 1000;
+    const certs = s.certificates.map((x, i) => `<div class="border-t border-[#eef0f3] px-4 py-2"><div class="mb-1 font-semibold">${t("cert")} #${i + 1}${x.self_signed ? ` <span class="chip bg-amber-100 text-amber-800">${t("self_signed")}</span>` : ""}${x.not_after_unix && x.not_after_unix < nowSec ? ` <span class="chip bg-red-100 text-red-800">${t("expired")}</span>` : ""}</div>
+      <table class="grid-table"><tbody>${row(t("issued_to"), esc([x.subject_cn, x.subject_org].filter(Boolean).join(" · ")))}${row(t("issued_by"), esc([x.issuer_cn, x.issuer_org].filter(Boolean).join(" · ")))}${row(t("valid_until"), esc(x.not_after || ""))}${row(t("san"), esc(x.san.slice(0, 20).join(", ")))}${row(t("serial"), esc(x.serial))}</tbody></table></div>`).join("");
+    server = s.incomplete ? `<div class="px-4 py-3 text-slate-500">${t("tls_incomplete")}</div>`
+      : `<table class="grid-table"><tbody>${row(t("version"), esc(s.version || "—"))}${row(t("cipher"), esc(s.cipher || "—"))}${row(t("alpn"), esc(s.alpn || "—"))}</tbody></table>${s.encrypted_certificates ? `<div class="px-4 py-2 text-[12px] text-slate-500">${t("tls13_certs")}</div>` : ""}${certs}`;
+  }
+  return `<div class="grid xl:grid-cols-2"><div class="border-r border-[#eef0f3]"><div class="px-4 py-2 font-semibold">${t("tls_client")}</div>${client}</div><div><div class="px-4 py-2 font-semibold">${t("tls_server")}</div>${server}</div></div>`;
+}
+
+function pkClass(p) {
+  const i = p.info;
+  if (/\bRST\b/.test(i)) return "pk-rst";
+  if (/\[(SYN|FIN)|, FIN|SYN, ACK/.test(i)) return "pk-syn";
+  for (const [pre, cls] of [["HTTP", "pk-http"], ["TLS", "pk-tls"], ["DNS", "pk-dns"], ["QUIC", "pk-quic"], ["ICMP", "pk-icmp"], ["UDP", "pk-udp"]]) if (i.startsWith(pre)) return cls;
+  return "pk-tcp";
+}
+
+function viewPackets(d) {
+  const t0 = d.packets.length ? d.packets[0].ts_us : 0, c = d.conn;
+  const rows = d.packets.map((p) => `<tr class="${pkClass(p)} ${ui.selected === p.n ? "sel" : ""}" data-pkt="${p.n}"><td class="num r">${p.n}</td><td class="num">${((p.ts_us - t0) / 1e6).toFixed(6)}</td>
+      <td class="mono">${esc(p.outbound ? c.local : c.remote)}</td><td class="mono">${esc(p.outbound ? c.remote : c.local)}</td><td>${p.outbound ? "↑" : "↓"}</td><td class="num r">${p.wire_len}</td><td class="mono" style="max-width:640px;overflow:hidden;text-overflow:ellipsis">${esc(p.info)}</td></tr>`).join("");
+  const dropped = d.dropped_packets ? `<div class="px-3 py-1 text-[11px] text-slate-500">${t("kept_last", { n: d.packets.length, d: fmtNum(d.dropped_packets) })}</div>` : "";
+  return `${dropped}<div class="scroll max-h-[34vh] border-b border-[#e3e6eb]"><table class="pk grid-table"><thead><tr><th class="r">${t("no_col")}</th><th>${t("time")}</th><th>${t("src")}</th><th>${t("dst")}</th><th></th><th class="r">${t("length")}</th><th>${t("info")}</th></tr></thead>
+    <tbody>${rows || empty(7, t("no_packets"))}</tbody></table></div><div id="inspector">${viewInspector()}</div>`;
+}
+
+function viewInspector() {
+  const pk = ui.packet;
+  if (!ui.selected) return `<div class="py-8 text-center text-slate-400">${t("pkt_pick")}</div>`;
+  if (!pk) return `<div class="py-8 text-center text-slate-400">${t("pkt_parsing")}</div>`;
+  if (pk.error) return `<div class="py-8 text-center text-slate-500">${esc(pk.error)}</div>`;
+  const bytes = pk.hex.match(/../g) || [];
+  const layerOf = new Array(bytes.length).fill(-1);
+  pk.layers.forEach((l, i) => { for (let k = l.range[0]; k < Math.min(l.range[1], bytes.length); k++) layerOf[k] = i; });
+  const tree = pk.layers.map((l, i) => `<details ${ui.closedLayers.has(l.name) ? "" : "open"} data-layer="${esc(l.name)}"><summary data-range="${l.range[0]},${l.range[1]}"><b class="lyr${i % 7}">${esc(l.name)}</b>, ${esc(l.summary)}</summary>
+      ${l.fields.map((f) => `<div class="f" data-range="${f.range[0]},${f.range[1]}" title="${esc(f.name)}: ${esc(f.value)}"><span class="text-slate-500">${esc(f.name)}:</span> <span class="mono">${esc(f.value)}</span></div>`).join("")}</details>`).join("");
+  const limit = ui.hexAll ? bytes.length : Math.min(bytes.length, 1024);
+  let hex = "";
+  for (let off = 0; off < limit; off += 16) {
+    let h = "", a = "";
+    for (let k = off; k < Math.min(off + 16, limit); k++) {
+      const v = parseInt(bytes[k], 16), cls = layerOf[k] >= 0 ? "lyr" + (layerOf[k] % 7) : "text-slate-400";
+      h += `<span data-b="${k}" class="${cls}">${bytes[k]}</span>${k % 16 === 7 ? "  " : " "}`;
+      a += `<span data-b="${k}" class="${cls}">${v >= 0x20 && v < 0x7f ? esc(String.fromCharCode(v)) : "·"}</span>`;
+    }
+    hex += `<div><span class="text-slate-400">${off.toString(16).padStart(4, "0")}</span>  <span class="hex">${h}</span> <span class="ascii">${a}</span></div>`;
+  }
+  const more = bytes.length > limit ? `<button id="hex-all" class="btn mt-2">${t("show_all", { n: fmtNum(bytes.length) })}</button>` : "";
+  const trunc = pk.wire_len > bytes.length ? `<div class="mt-1 text-[11px] text-slate-500">${t("stored_of", { a: fmtNum(bytes.length), b: fmtNum(pk.wire_len) })}</div>` : "";
+  return `<div class="flex items-center gap-3 border-b border-[#eef0f3] px-3 py-1.5 text-[12px] text-slate-500"><b class="text-slate-800">${t("frame")} ${pk.n}</b>: ${fmtNum(pk.wire_len)} ${t("bytes")}, ${pk.outbound ? t("sent_v") : t("recv_v")} ${clockUs(pk.ts_us)}<span class="ml-auto">${t("hover_hint")}</span></div>
+    <div class="grid xl:grid-cols-2"><div class="tree scroll max-h-[46vh] border-r border-[#eef0f3] py-1" id="layers">${tree}</div><div class="mono scroll max-h-[46vh] bg-[#fbfbfc] p-3 text-[12px] leading-5" id="hexdump">${hex}${more}${trunc}</div></div>`;
+}
+
+function viewStream() {
+  const s = ui.stream;
+  if (!s) return `<div class="py-8 text-center text-slate-400">${t("assembling")}</div>`;
+  if (s.error) return `<div class="py-8 text-center text-slate-500">${esc(s.error)}</div>`;
+  const head = `<div class="flex flex-wrap gap-4 border-b border-[#eef0f3] px-4 py-2 text-[12px]"><span class="text-violet-700">${t("stream_out")} ${fmtBytes(s.bytes_out)}</span><span class="text-sky-700">${t("stream_in")} ${fmtBytes(s.bytes_in)}</span>
+      ${s.dropped_packets ? `<span class="text-slate-500">${t("stream_drop", { n: fmtNum(s.dropped_packets) })}</span>` : ""}${s.truncated ? `<span class="text-slate-500">${t("stream_trunc")}</span>` : ""}</div>
+    ${s.encrypted ? `<div class="border-b border-[#eef0f3] bg-slate-50 px-4 py-2 text-[12px] text-slate-600">${t("stream_enc")}</div>` : ""}`;
+  const segs = s.segments.map((g) => `${g.gap_before ? `<div class="py-1 text-center text-[11px] text-amber-700">${t("stream_gap", { n: fmtNum(g.gap_before) })}</div>` : ""}
+      <div class="border-l-4 ${g.outbound ? "border-violet-400 bg-violet-50/50" : "border-sky-400 bg-sky-50/60"}"><div class="px-3 pt-1 text-[11px] ${g.outbound ? "text-violet-700" : "text-sky-700"}">${g.outbound ? t("stream_out") : t("stream_in")} · <span class="num">${fmtNum(g.bytes)} ${t("bytes")} · ${g.packets} ${t("packets_short")} · ${clockUs(g.ts_us)}</span>${g.readable ? "" : " · " + t("stream_bin")}</div>
+        <pre class="stream mono scroll max-h-96 px-3 pb-2 text-[12px]">${g.readable ? esc(g.text) : formatHex(g.hex)}</pre></div>`).join("");
+  return head + `<div class="space-y-1 p-2">${segs || `<div class="py-8 text-center text-slate-400">${t("stream_none")}</div>`}</div>`;
+}
+
+function formatHex(hex) {
+  const b = hex.match(/../g) || [];
+  let o = "";
+  for (let i = 0; i < b.length; i += 16) o += b.slice(i, i + 16).join(" ") + "\n";
+  return o;
+}
+
+/** `first` = the page was just opened: apply the URL's tab/packet and start a trace if asked. */
+async function refreshDetail(first) {
+  const id = route.params.id, seq = ++ui.seq.detail;
+  let detail;
+  try { detail = await getJson(`/api/connections/${id}`); }
+  catch (e) { detail = { error: e.status === 404 ? t("conn_gone") : String(e.message || e) }; }
+  if (seq !== ui.seq.detail || route.params.id !== id) return;
+  ui.detail = detail;
+  if (first && route.params.tab) ui.detailTab = route.params.tab;
+  if (ui.detailTab === "stream" && !detail.error) {
+    try { ui.stream = await getJson(`/api/connections/${id}/stream`); } catch (e) { ui.stream = { error: String(e.message || e) }; }
+    if (seq !== ui.seq.detail) return;
+  }
+  // Plain renderView(): with the "route changed" flag it would reschedule polling, which
+  // calls refreshDetail again — an endless request loop.
+  if (route.name === "conn") renderView();
+  if (first && route.params.pkt && ui.selected === null) selectPacket(Number(route.params.pkt));
+  if (first && ui.detailTab === "route" && !detail.error && !ui.traces[detail.conn.remote_ip]) runTrace(detail.conn.remote_ip);
+}
+
+async function selectPacket(n) {
+  ui.selected = n; ui.packet = null; ui.hexAll = false;
+  const seq = ++ui.seq.packet;
+  renderView();
+  let pk;
+  try { pk = await getJson(`/api/connections/${route.params.id}/packets/${n}`); } catch (e) { pk = { error: t("pkt_gone") }; }
+  if (seq !== ui.seq.packet) return; // the user already moved on (arrow keys)
+  ui.packet = pk;
+  if (route.name === "conn") renderView();
+}
+
+// ================= notifications & language =================
+
+function notifyNew(s) {
+  if (IN_APP || !s.alerts.length) return;
+  const newest = s.alerts[0].id;
+  if (ui.notifiedUpTo === null || !ui.notify || !("Notification" in window) || Notification.permission !== "granted") { ui.notifiedUpTo = newest; return; }
+  const fresh = s.alerts.filter((a) => a.id > ui.notifiedUpTo).slice(0, 3);
+  ui.notifiedUpTo = newest;
+  for (const a of fresh) {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = alertText(a);
+    try { new Notification(`netscope · ${t("kind_" + a.kind)}`, { body: tmp.textContent, tag: "netscope-" + a.id }); } catch (e) { /* notifications unavailable */ }
+  }
+}
+
+$("notify-btn").addEventListener("click", async () => {
+  if (!("Notification" in window)) return;
+  if (!ui.notify) {
+    const perm = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+    if (perm !== "granted") { window.alert(t("notify_denied")); return; }
+  }
+  ui.notify = !ui.notify;
+  store.set("notify", ui.notify);
+  renderChrome();
+});
+
+$("lang").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-lang]");
+  if (!b) return;
+  LANG = b.dataset.lang;
+  store.set("lang", LANG);
+  renderChrome();
+  if (last) renderHeader(last);
+  renderView();
+});
+
+// ================= rendering & events =================
+
+/** A selector that finds the same row again after the view is rebuilt (rows have no ids). */
+function focusKey(el) {
+  if (!el || el === document.body) return null;
+  if (el.id) return "#" + CSS.escape(el.id);
+  const row = el.closest(".clickable");
+  if (!row) return null;
+  for (const k of ["conn", "pid", "host", "sockpid", "procname", "group", "pkt", "traceGoto", "watchAdd", "watchRemove"]) {
+    if (row.dataset[k] !== undefined) return `.clickable[data-${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}="${CSS.escape(row.dataset[k])}"]`;
+  }
+  return null;
+}
+
+function renderView(routeChanged) {
+  // Replacing the DOM under a pointer drag would detach the map: draw again when it ends.
+  if (ui.mapDrag) { ui.renderPending = true; return; }
+  renderNav();
+  const v = $("view");
+  const focused = focusKey(document.activeElement);
+  const caret = focused && "selectionStart" in document.activeElement ? document.activeElement.selectionStart : null;
+  const scrolls = [...v.querySelectorAll(".scroll")].map((e) => e.scrollTop);
+  let html;
+  if (route.name === "conn") html = viewConnection();
+  else if (route.name === "dns") html = viewDns();
+  else if (route.name === "sockets") html = viewSockets();
+  else if (route.name === "settings") html = viewSettings();
+  else if (!last) html = panel("netscope", `<div class="py-10 text-center text-slate-400">${t("waiting")}</div>`);
+  else html = ({ processes: viewProcesses, connections: viewConnections, hosts: viewHosts, map: viewMap, route: viewRoute, dns: viewDns, sockets: viewSockets, alerts: viewAlerts }[route.name] || viewOverview)(last);
+  v.innerHTML = html;
+  // Keyboard access: clickable rows are focusable (Enter/Space activate them, see below);
+  // search boxes get their placeholder as an accessible name.
+  v.querySelectorAll(".clickable").forEach((e) => e.setAttribute("tabindex", "0"));
+  v.querySelectorAll("input[placeholder]:not([aria-label])").forEach((i) => i.setAttribute("aria-label", i.placeholder));
+  if (!routeChanged) v.querySelectorAll(".scroll").forEach((e, i) => { if (scrolls[i] !== undefined) e.scrollTop = scrolls[i]; });
+  const again = focused && document.querySelector(focused);
+  if (again) { again.focus({ preventScroll: true }); if (caret !== null) try { again.setSelectionRange(caret, caret); } catch (e) { /* not a text input */ } }
+  if (routeChanged) schedulePolling();
+}
+
+function schedulePolling() {
+  clearInterval(pollTimer); pollTimer = null;
+  const every = (fn, ms) => { fn(); pollTimer = setInterval(fn, ms); };
+  if (route.name === "conn") { refreshDetail(true); pollTimer = setInterval(refreshDetail, 2000); }
+  else if (route.name === "sockets") every(refreshSockets, 2000);
+  else if (route.name === "dns") every(refreshDns, 3000);
+  else if (route.name === "connections" && (route.params.pid !== undefined || ui.connQuery.trim())) { connCache = null; every(refreshConnections, 2000); }
+  else if (route.name === "route" || route.name === "hosts") { every(refreshWatch, 5000); if (route.name === "route" && ui.routeIp && !ui.traces[ui.routeIp]) runTrace(ui.routeIp); }
+  else if (route.name === "settings") { ui.settings.status = null; loadSettings(); }
+}
+
+function setConnQuery(q) {
+  ui.connQuery = q; store.set("connQuery", q);
+  if (route.name === "connections" && route.params.pid === undefined) { schedulePolling(); renderView(); } else location.hash = "#/connections";
+}
+
+$("view").addEventListener("click", (ev) => {
+  const el = ev.target;
+  const hit = (sel) => el.closest(sel);
+  let x;
+  if ((x = hit("[data-map-zoom]"))) {
+    const wrap = x.closest(".map-wrap"), key = wrap.dataset.map;
+    if (x.dataset.mapZoom === "reset") ui.mapViews[key] = null; else zoomView(key, x.dataset.mapZoom === "in" ? 0.5 : 2);
+    applyMapView(wrap); return;
+  }
+  if ((x = hit("[data-goto]"))) { location.hash = x.dataset.goto; return; }
+  if ((x = hit("[data-watch-add]"))) { ev.stopPropagation(); watchChange("POST", x.dataset.watchAdd, x.dataset.label); return; }
+  if ((x = hit("[data-watch-remove]"))) { watchChange("DELETE", x.dataset.watchRemove); return; }
+  if (el.id === "watch-add") { const ip = $("watch-ip").value.trim(); if (ip) watchChange("POST", ip); return; }
+  if (el.id === "help-btn") { ui.help = !ui.help; if (ui.help && !ui.fields.length) getJson("/api/filter/fields").then((f) => { ui.fields = f; renderView(); }); renderView(); return; }
+  if ((x = hit("[data-trace]"))) { const ip = route.name === "route" && $("route-ip") ? $("route-ip").value.trim() : x.dataset.trace; if (ip) { ui.routeIp = ip; runTrace(ip, !!ui.traces[ip]); } return; }
+  if ((x = hit("[data-trace-goto]"))) { ev.stopPropagation(); location.hash = `#/route?ip=${encodeURIComponent(x.dataset.traceGoto)}`; return; }
+  if ((x = hit("[data-pid]"))) { location.hash = `#/connections?pid=${x.dataset.pid}`; return; }
+  if ((x = hit("[data-group]"))) { const g = x.dataset.group; if (ui.expanded.has(g)) ui.expanded.delete(g); else ui.expanded.add(g); renderView(); return; }
+  if ((x = hit("[data-conn]"))) { location.hash = `#/conn/${x.dataset.conn}`; return; }
+  if ((x = hit("[data-procname]"))) { setConnQuery(`process == "${x.dataset.procname.replace(/"/g, '\\"')}"`); return; }
+  if ((x = hit("[data-host]"))) { const ip = x.dataset.host; setConnQuery(`ip == ${ip.includes(":") ? `"${ip}"` : ip}`); return; }
+  if ((x = hit("[data-sockpid]")) && x.dataset.sockpid !== "0") { location.hash = `#/connections?pid=${x.dataset.sockpid}`; return; }
+  if ((x = hit("[data-filter]"))) { ui.alertFilter = x.dataset.filter; renderView(); return; }
+  if ((x = hit("[data-dtab]"))) {
+    ui.detailTab = x.dataset.dtab; ui.stream = null; renderView(); refreshDetail();
+    if (ui.detailTab === "route" && ui.detail && !ui.detail.error && !ui.traces[ui.detail.conn.remote_ip]) runTrace(ui.detail.conn.remote_ip);
+    return;
+  }
+  if ((x = hit("[data-pkt]"))) { selectPacket(Number(x.dataset.pkt)); return; }
+  if (el.id === "hex-all") { ui.hexAll = true; renderView(); }
+  if (el.id === "set-save") { saveSettings(); return; }
+  if (el.id === "set-restart") { restartNow(); }
+});
+
+// Settings form: keep the edited values in ui.settings.form (the page re-renders on save).
+$("view").addEventListener("change", (ev) => {
+  const f = ui.settings.form, el = ev.target;
+  if (!f || !el.id || !el.id.startsWith("set-")) return;
+  const key = el.id.slice(4).replace(/-/g, "_");
+  if (el.type === "checkbox") f[key] = el.checked; else f[key] = el.value;
+  if (key === "host") renderView();
+});
+
+$("view").addEventListener("keydown", (ev) => {
+  if ((ev.key === "Enter" || ev.key === " ") && ev.target.classList && ev.target.classList.contains("clickable")) { ev.preventDefault(); ev.target.click(); return; }
+  if (ev.key !== "Enter") return;
+  const ip = ev.target.value && ev.target.value.trim();
+  if (ev.target.id === "route-ip" && ip) { ui.routeIp = ip; runTrace(ip, true); }
+  if (ev.target.id === "watch-ip" && ip) watchChange("POST", ip);
+});
+// Remember which inspector layers the user collapsed ("toggle" does not bubble: capture it).
+$("view").addEventListener("toggle", (ev) => {
+  const d = ev.target;
+  if (d.tagName !== "DETAILS" || !d.dataset.layer) return;
+  if (d.open) ui.closedLayers.delete(d.dataset.layer); else ui.closedLayers.add(d.dataset.layer);
+}, true);
+// "/" jumps to the connection filter, like in many web apps.
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey || ["INPUT", "TEXTAREA"].includes(ev.target.tagName)) return;
+  ev.preventDefault();
+  if ($("conn-q")) $("conn-q").focus(); else location.hash = "#/connections";
+});
+
+// Arrow keys move through the packet list, like in Wireshark.
+document.addEventListener("keydown", (ev) => {
+  if (route.name !== "conn" || ui.detailTab !== "packets" || !ui.detail || ui.detail.error || ev.target.tagName === "INPUT") return;
+  if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+  const ns = ui.detail.packets.map((p) => p.n);
+  if (!ns.length) return;
+  const i = ns.indexOf(ui.selected);
+  const next = ev.key === "ArrowDown" ? ns[Math.min(ns.length - 1, i + 1)] : ns[Math.max(0, i - 1)];
+  ev.preventDefault();
+  if (next !== undefined) selectPacket(next);
+});
+
+function highlight(range, on) {
+  const [a, b] = range.split(",").map(Number);
+  document.querySelectorAll("#hexdump span[data-b]").forEach((s) => { const k = Number(s.dataset.b); if (k >= a && k < b) s.classList.toggle("hl", on); });
+}
+$("view").addEventListener("mouseover", (ev) => { const r = ev.target.closest("#layers [data-range]"); if (r) highlight(r.dataset.range, true); });
+$("view").addEventListener("mouseout", (ev) => { const r = ev.target.closest("#layers [data-range]"); if (r) highlight(r.dataset.range, false); });
+
+$("view").addEventListener("input", (ev) => {
+  const id = ev.target.id, val = ev.target.value;
+  // Raw text is kept so re-rendering never eats a space the user just typed.
+  if (id === "conn-q") {
+    ui.connQuery = val; store.set("connQuery", val);
+    clearTimeout(ev.target._t);
+    ev.target._t = setTimeout(() => { schedulePolling(); renderView(); }, 300);
+  } else if (id === "sock-q") { ui.sockQuery = val; renderView(); }
+  else if (id === "host-q") { ui.hostQuery = val; renderView(); }
+  else if (id === "dns-q") { ui.dnsQuery = val; clearTimeout(ev.target._t); ev.target._t = setTimeout(refreshDns, 300); }
+  else if (id === "route-ip") ui.routeIp = val.trim();
+  else if (id.startsWith("set-") && ui.settings.form) { const key = id.slice(4).replace(/-/g, "_"); if (ev.target.type !== "checkbox") ui.settings.form[key] = val; }
+});
+
+function onSnapshot(s) {
+  const first = !last;
+  last = s;
+  renderHeader(s);
+  notifyNew(s);
+  // These views refresh on their own timers; typing must not be interrupted.
+  const self = ["conn", "sockets", "dns", "settings"].includes(route.name) || (route.name === "connections" && (route.params.pid !== undefined || ui.connQuery.trim()));
+  const typing = (document.activeElement && ["route-ip", "watch-ip"].includes(document.activeElement.id)) || ui.mapDrag;
+  // The very first snapshot must always render: self-refreshing views may have drawn a placeholder.
+  if (first || (!self && !typing)) renderView(); else renderNav();
+}
+
+function setConn(state) {
+  connState = state;
+  const v = { live: ["bg-emerald-500", "conn_live"], polling: ["bg-amber-400", "conn_polling"], offline: ["bg-red-500", "conn_offline"] }[state];
+  $("conn").innerHTML = `<span class="h-2 w-2 rounded-full ${v[0]}"></span>${t(v[1])}`;
+}
+
+let statsPoll = null;
+function startPolling() {
+  if (statsPoll) return;
+  const poll = () => getJson("/api/stats").then((s) => { onSnapshot(s); setConn("polling"); }).catch(() => setConn("offline"));
+  poll();
+  statsPoll = setInterval(poll, 3000);
+}
+function stopPolling() { clearInterval(statsPoll); statsPoll = null; }
+
+let retries = 0;
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
+  ws.onopen = () => { retries = 0; stopPolling(); setConn("live"); };
+  ws.onmessage = (ev) => { try { onSnapshot(JSON.parse(ev.data)); } catch (e) { console.error("bad snapshot", e); } };
+  ws.onclose = () => { startPolling(); setTimeout(connect, Math.min(10000, 1000 * 2 ** retries++)); };
+  ws.onerror = () => ws.close();
+}
+
+route = parseRoute();
+if (route.name === "route" && route.params.ip) ui.routeIp = route.params.ip;
+if (route.name === "connections" && route.params.q !== undefined) ui.connQuery = route.params.q;
+renderChrome();
+renderView(true);
+connect();
+</script>
+</body>
+</html>

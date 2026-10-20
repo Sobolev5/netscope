@@ -1,0 +1,57 @@
+[package]
+name = "netscope"
+version = "0.2.0"
+edition = "2021"
+description = "Real-time network traffic analyzer with anomaly detection and an embedded web dashboard"
+license = "MIT"
+build = "build.rs"
+
+[[bin]]
+name = "netscope"
+path = "src/main.rs"
+
+# Windows desktop program: own window (WebView2), tray icon, no console (see src/bin/app/).
+[[bin]]
+name = "netscope-app"
+path = "src/bin/app/main.rs"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4.5", features = ["derive"] }
+etherparse = "0.16"
+libloading = "0.8"
+memchr = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+futures-util = { version = "0.3", default-features = false }
+tokio-tungstenite = "0.29"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_Globalization",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
