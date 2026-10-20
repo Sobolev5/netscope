@@ -1,5 +1,5 @@
-//! The traffic model: per-remote-host volumes, protocol mix, bandwidth history,
-//! IP → name mapping learned from DNS answers / TLS SNI / HTTP Host, and alerts.
+﻿//! The traffic model: per-remote-host volumes, protocol mix, bandwidth history,
+//! IP в†’ name mapping learned from DNS answers / TLS SNI / HTTP Host, and alerts.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, SocketAddr};
@@ -10,8 +10,11 @@ use serde::Serialize;
 use super::addr::{is_external, is_local_scope};
 use super::anomaly::{cleartext_service, details, inspect_dns, AlertKind, AlertLog, NewAlert, Severity};
 use super::dnslog::{DnsLog, Requester};
+use super::dnslog::DnsEntry;
 use super::flows::{Flow, FlowKey, FlowTable, Observed, ProcStats, L4};
+use super::journal::{ConnRecord, Journal, JournalRecord, Kind, Stamped};
 use super::novelty::{registrable_domain, Novel, Novelty};
+use super::views::DnsEntryView;
 use super::persist::{self, Persisted, WatchEntry};
 use crate::capture::engine::unix_now;
 use crate::decode::{linktype, App, PacketInfo, Proto, Transport};
@@ -80,6 +83,8 @@ pub struct Totals {
     pub bytes: u64,
     pub bytes_in: u64,
     pub bytes_out: u64,
+    pub packets_in: u64,
+    pub packets_out: u64,
     pub non_ip_packets: u64,
 }
 
@@ -184,7 +189,7 @@ pub struct State {
     active: Vec<IpAddr>,
     pub(super) alerts: AlertLog,
     pub(super) flows: FlowTable,
-    /// Latest socket → process index from the OS (or the demo).
+    /// Latest socket в†’ process index from the OS (or the demo).
     owners: Option<Arc<OwnerIndex>>,
     want_owners: bool,
     /// Traffic per process (PID), including connections already evicted.
@@ -202,7 +207,15 @@ pub struct State {
     pub(super) signatures: HashMap<String, Signature>,
     /// Hosts whose route is traced periodically.
     pub routes: RouteWatch,
+    /// On-disk journal of finished connections, DNS lookups and alerts; `None` = not kept.
+    journal: Option<Arc<Journal>>,
+    /// Connections seen closed, `(close time Вµs, id)` in order: journaled by `advance` once
+    /// `CLOSE_GRACE_US` has passed, so a late process attribution still lands in the record.
+    close_queue: VecDeque<(i64, u64)>,
 }
+
+/// A closed connection waits this long (traffic clock) before it is journaled.
+pub const CLOSE_GRACE_US: i64 = 5_000_000;
 
 impl State {
     pub fn new(cfg: Config, local: HashSet<IpAddr>, capture: CaptureInfo) -> Self {
@@ -235,7 +248,124 @@ impl State {
             signatures: HashMap::new(),
             routes: RouteWatch::default(),
             alerts,
+            journal: None,
+            close_queue: VecDeque::new(),
         }
+    }
+
+    /// Journals the connections whose close is at least `CLOSE_GRACE_US` old (once each;
+    /// one evicted meanwhile was journaled then).
+    fn journal_due_closes(&mut self) {
+        let now_us = self.now.saturating_mul(1_000_000);
+        while let Some(&(closed_us, id)) = self.close_queue.front() {
+            if closed_us.saturating_add(CLOSE_GRACE_US) > now_us {
+                break;
+            }
+            self.close_queue.pop_front();
+            if self.flows.get(id).is_some_and(|f| !f.journaled && self.journal_flow(f, "closed")) {
+                if let Some(f) = self.flows.get_mut(id) {
+                    f.journaled = true;
+                }
+            }
+        }
+    }
+
+    /// Attaches the journal; records are produced from now on (while its retention is > 0).
+    pub fn set_journal(&mut self, journal: Arc<Journal>) {
+        self.journal = Some(journal);
+    }
+
+    pub fn journal(&self) -> Option<&Arc<Journal>> {
+        self.journal.as_ref()
+    }
+
+    /// The journal when it is attached and switched on.
+    fn journal_on(&self) -> Option<&Journal> {
+        self.journal.as_deref().filter(|j| j.enabled())
+    }
+
+    /// Writes a connection record; `false` when the journal is off.
+    fn journal_flow(&self, f: &Flow, reason: &'static str) -> bool {
+        let Some(j) = self.journal_on() else { return false };
+        let ts = unix_now();
+        let rec = ConnRecord::from_view(ts, self.conn_view(f), reason);
+        if let Some(r) = JournalRecord::new(Kind::Connections, ts, &rec) {
+            j.push(r);
+        }
+        true
+    }
+
+    /// Writes a DNS record for an entry that is final (answered, failed or evicted).
+    fn journal_dns(&self, e: DnsEntry) {
+        let Some(j) = self.journal_on() else { return };
+        let answers: Vec<IpAddr> = e.answers.iter().filter_map(|a| a.parse().ok()).collect();
+        let mut used_by: Vec<String> = Vec::new();
+        if !answers.is_empty() {
+            for f in self.flows().filter(|f| answers.contains(&f.key.remote.ip())) {
+                if let Some(p) = &f.process {
+                    if !used_by.contains(&p.name) {
+                        used_by.push(p.name.clone());
+                    }
+                }
+            }
+            used_by.sort();
+        }
+        let ts = unix_now();
+        let view = DnsEntryView { entry: e, used_by };
+        if let Some(r) = JournalRecord::new(Kind::Dns, ts, &Stamped { ts, inner: &view }) {
+            j.push(r);
+        }
+    }
+
+    /// Journals every connection not journaled yet (reason `shutdown`); returns how many.
+    /// For the end of the program, once the capture thread is done.
+    pub fn journal_remaining(&mut self) -> usize {
+        let ids: Vec<u64> = self.flows.iter().filter(|f| !f.journaled).map(|f| f.id).collect();
+        let mut n = 0;
+        for id in ids {
+            if self.flows.get(id).is_some_and(|f| self.journal_flow(f, "shutdown")) {
+                n += 1;
+            }
+            if let Some(f) = self.flows.get_mut(id) {
+                f.journaled = true;
+            }
+        }
+        n
+    }
+
+    /// Seconds between the first and the current second of the traffic clock.
+    pub fn uptime_secs(&self) -> i64 {
+        self.first_ts.map_or(0, |t| self.now - t)
+    }
+
+    /// Throughput of the last complete second (the newest sample is still filling up).
+    pub fn rates(&self) -> super::Rates {
+        let complete = if self.series.len() >= 2 { self.series.get(self.series.len() - 2) } else { self.series.back() };
+        complete.map_or(super::Rates::default(), |s| super::Rates { bytes_in: s.bytes_in, bytes_out: s.bytes_out, packets: s.packets })
+    }
+
+    /// (queries seen, failed answers) of the DNS journal.
+    pub fn dns_counts(&self) -> (u64, u64) {
+        (self.dns_log.queries, self.dns_log.failures)
+    }
+
+    pub fn host_count(&self) -> usize {
+        self.hosts.len()
+    }
+
+    /// Bytes per country code of the hosts in memory (`??` for unknown), largest first.
+    pub fn country_bytes(&self) -> Vec<(String, u64)> {
+        let mut by_code: HashMap<String, u64> = HashMap::new();
+        if let Some(g) = &self.geo {
+            for (ip, h) in &self.hosts {
+                if let Some(info) = g.lookup(*ip) {
+                    *by_code.entry(info.country_code.unwrap_or_else(|| "??".into())).or_default() += h.total();
+                }
+            }
+        }
+        let mut v: Vec<(String, u64)> = by_code.into_iter().collect();
+        v.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        v
     }
 
     pub fn set_status(&mut self, status: CaptureStatus) {
@@ -294,6 +424,7 @@ impl State {
         }
         self.now = sec;
         self.evict();
+        self.journal_due_closes();
     }
 
     /// End of input (capture file finished): closes the last second so its spike checks run.
@@ -329,9 +460,11 @@ impl State {
         if outbound {
             sample.bytes_out += len;
             self.totals.bytes_out += len;
+            self.totals.packets_out += 1;
         } else {
             sample.bytes_in += len;
             self.totals.bytes_in += len;
+            self.totals.packets_in += 1;
         }
         let c = &mut self.protocols[proto.index()];
         c.packets += 1;
@@ -364,6 +497,11 @@ impl State {
         host.sec_bytes += len;
 
         let o = self.track_flow(ts_us, wire_len, frame, info, outbound);
+        // A closed connection is journaled by `advance` after a grace period, so the process
+        // found by the next socket-table poll is still part of the record.
+        if o.closed {
+            self.close_queue.push_back((ts_us, o.id));
+        }
         if self.flows.over_limits() {
             self.evict();
         }
@@ -428,7 +566,7 @@ impl State {
         &mut e.1
     }
 
-    /// Installs a new socket → process index and attributes waiting connections with it.
+    /// Installs a new socket в†’ process index and attributes waiting connections with it.
     pub fn set_owners(&mut self, idx: Arc<OwnerIndex>) {
         let (local, learn) = (&self.local, self.learn_local);
         let found = self.flows.attribute(|k| {
@@ -688,7 +826,9 @@ impl State {
             } else {
                 "udp"
             };
-            self.dns_log.record(ts_us, m, remote, requester, transport);
+            for e in self.dns_log.record(ts_us, m, remote, requester, transport) {
+                self.journal_dns(e);
+            }
         }
         match &info.app {
             App::Dns(m) if m.response => {
@@ -781,6 +921,12 @@ impl State {
     fn alert_at(&mut self, ts: i64, a: NewAlert) {
         if self.alerts.push(ts, a) {
             tracing::debug!("alert recorded at {ts}");
+            if let (Some(j), Some(alert)) = (self.journal_on(), self.alerts.last()) {
+                // The alert carries its own `ts` (packet time в‰€ wall time in a live capture).
+                if let Some(r) = JournalRecord::new(Kind::Alerts, alert.ts, alert) {
+                    j.push(r);
+                }
+            }
         }
     }
 
@@ -820,7 +966,11 @@ impl State {
     }
 
     fn evict(&mut self) {
-        self.flows.evict();
+        for f in self.flows.evict() {
+            if !f.journaled {
+                self.journal_flow(&f, "evicted");
+            }
+        }
         if self.proc_stats.len() > 2048 {
             let horizon = self.proc_stats.values().map(|(_, s)| s.last_us).max().unwrap_or(0) - 3_600_000_000;
             self.proc_stats.retain(|_, (_, s)| s.last_us >= horizon);
@@ -853,6 +1003,7 @@ pub fn estimate_hops(ttl: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analytics::flows::FlowState;
     use crate::decode::{dns, http::HttpRequest};
 
     const ME: &str = "192.168.1.50";
@@ -1334,6 +1485,133 @@ mod tests {
         assert_eq!(a.len(), 1);
         assert_eq!((a[0].kind, a[0].host.as_deref()), (AlertKind::RouteChange, Some("203.0.113.9")));
         assert!((a[0].ts - unix_now()).abs() < 5 && a[0].ts != T0, "{}", a[0].ts);
+    }
+
+    #[test]
+    fn journal_gets_exactly_one_connection_record_per_flow() {
+        let mut s = state();
+        s.flows = FlowTable::new(10);
+        let j = Arc::new(Journal::new("unused", 1));
+        s.set_journal(j.clone());
+        // A connection closed by a RST: journaled once the close is five seconds old (traffic
+        // clock), not again for later packets.
+        let mut rst = pkt(ME, "203.0.113.1", 5000, 443, Proto::Tls, App::None);
+        rst.transport = Transport::Tcp { syn: false, ack: true, fin: false, rst: true };
+        s.record(us(T0), 100, Some(&pkt(ME, "203.0.113.1", 5000, 443, Proto::Tls, App::None)));
+        s.record(us(T0), 60, Some(&rst));
+        s.record(us(T0), 60, Some(&rst));
+        s.advance(T0 + 4);
+        assert_eq!(j.pending(), 0, "still within the grace period");
+        s.advance(T0 + 5);
+        assert_eq!(j.pending(), 1);
+        s.advance(T0 + 6);
+        assert_eq!(j.pending(), 1, "once only");
+        // Thirty more connections overflow the table: the oldest are evicted (the closed one
+        // first, already journaled), the open ones get an `evicted` record.
+        for i in 0..30u16 {
+            s.record(us(T0 + 7 + i64::from(i)), 100, Some(&pkt(ME, "203.0.113.2", 6000 + i, 443, Proto::Tls, App::None)));
+        }
+        s.advance(T0 + 100);
+        let left = s.flows.len();
+        assert!(left < 30 && left > 0, "{left}");
+        assert_eq!(s.journal_remaining(), left, "shutdown journals what is left");
+        assert_eq!(s.journal_remaining(), 0, "nothing twice");
+        let recs: Vec<serde_json::Value> = j.take_pending().iter().filter(|r| r.kind == Kind::Connections).map(|r| serde_json::from_str(&r.line).unwrap()).collect();
+        assert_eq!(recs.len(), 31, "one record per connection");
+        let mut ids: Vec<u64> = recs.iter().map(|c| c["id"].as_u64().unwrap()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 31);
+        let by_reason = |r: &str| recs.iter().filter(|c| c["reason"] == r).count();
+        assert_eq!((by_reason("closed"), by_reason("evicted"), by_reason("shutdown")), (1, 30 - left, left));
+        let closed = recs.iter().find(|c| c["reason"] == "closed").unwrap();
+        assert_eq!((closed["state"].as_str(), closed["remote"].as_str(), closed["l4"].as_str(), closed["app"].as_str()), (Some("closed"), Some("203.0.113.1:443"), Some("tcp"), Some("tls")));
+        // Written after the grace period: the packet after the RST is in it too.
+        assert_eq!((closed["bytes_out"].as_u64(), closed["packets_out"].as_u64(), closed["retrans"].as_u64()), (Some(220), Some(3), Some(0)));
+        assert!((closed["ts"].as_i64().unwrap() - unix_now()).abs() < 5, "stamped with wall-clock time");
+        assert_eq!(closed["first_us"], us(T0));
+        for key in ["process", "name", "geo", "initiated", "tls", "rtt_ms", "hops"] {
+            assert!(closed[key].is_null(), "{key}: {closed}");
+        }
+        assert_eq!(closed.as_object().unwrap().len(), 23, "the documented field set: {closed}");
+
+        // Switched off (0 days): nothing is produced, flows are not marked.
+        j.set_retention_days(0);
+        s.record(us(T0 + 200), 100, Some(&pkt(ME, "203.0.113.3", 7000, 443, Proto::Tls, App::None)));
+        let mut rst = pkt(ME, "203.0.113.3", 7000, 443, Proto::Tls, App::None);
+        rst.transport = Transport::Tcp { syn: false, ack: true, fin: false, rst: true };
+        s.record(us(T0 + 200), 60, Some(&rst));
+        s.advance(T0 + 210);
+        assert_eq!(j.pending(), 0);
+        let f = s.flows().find(|f| f.key.local.port() == 7000).unwrap();
+        assert!(f.state == FlowState::Closed && !f.journaled, "not marked while the journal is off");
+    }
+
+    /// The socket table is polled after the fact: a short connection closed before the
+    /// poll is attributed later, and the grace period lets the record carry the process.
+    #[test]
+    fn journal_record_of_a_short_connection_carries_a_late_attribution() {
+        use crate::procs::{OsSnapshot, OwnerIndex, SocketEntry};
+        let mut s = state();
+        let j = Arc::new(Journal::new("unused", 1));
+        s.set_journal(j.clone());
+        let mut rst = pkt(ME, "203.0.113.1", 5000, 443, Proto::Tls, App::None);
+        rst.transport = Transport::Tcp { syn: false, ack: true, fin: false, rst: true };
+        s.record(us(T0), 100, Some(&pkt(ME, "203.0.113.1", 5000, 443, Proto::Tls, App::None)));
+        s.record(us(T0), 60, Some(&rst));
+        assert!(s.flows().next().unwrap().process.is_none() && s.wants_owner_refresh());
+        // Two seconds later the OS reports the socket's owner.
+        s.advance(T0 + 2);
+        let mut procs = HashMap::new();
+        procs.insert(42, ProcInfo { pid: 42, name: "python.exe".into(), path: Some(r"C:\py\python.exe".into()), parent: None });
+        let sock = SocketEntry { proto: SockProto::Tcp, local: format!("{ME}:5000").parse().unwrap(), remote: Some("203.0.113.1:443".parse().unwrap()), state: Some("TIME_WAIT"), pid: 42 };
+        s.set_owners(Arc::new(OwnerIndex::new(OsSnapshot { sockets: vec![sock], procs, error: None })));
+        assert_eq!(j.pending(), 0, "not journaled yet");
+        s.advance(T0 + 5);
+        let recs: Vec<serde_json::Value> = j.take_pending().iter().filter(|r| r.kind == Kind::Connections).map(|r| serde_json::from_str(&r.line).unwrap()).collect();
+        assert_eq!(recs.len(), 1);
+        assert_eq!((recs[0]["reason"].as_str(), recs[0]["process"]["pid"].as_u64(), recs[0]["process"]["name"].as_str()), (Some("closed"), Some(42), Some("python.exe")));
+        assert_eq!(recs[0]["process"]["path"], r"C:\py\python.exe");
+        assert_eq!(s.journal_remaining(), 0, "already journaled");
+    }
+
+    #[test]
+    fn journal_records_dns_lookups_and_alerts() {
+        let mut s = state();
+        let j = Arc::new(Journal::new("unused", 1));
+        s.set_journal(j.clone());
+        let q = dns::parse(&dns::build_query(1, "example.org", dns::TYPE_A)).unwrap();
+        s.record(us(T0), 80, Some(&pkt(ME, "1.1.1.1", 5000, 53, Proto::Dns, App::Dns(q))));
+        assert_eq!(j.pending(), 0, "a pending query is not a record yet");
+        let r = dns::parse(&dns::build_response(1, "example.org", &[ip("93.184.215.14")], 60)).unwrap();
+        s.record(us(T0) + 25_000, 90, Some(&pkt("1.1.1.1", ME, 53, 5000, Proto::Dns, App::Dns(r))));
+        let recs = j.take_pending();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].kind, Kind::Dns);
+        let d: serde_json::Value = serde_json::from_str(&recs[0].line).unwrap();
+        assert_eq!((d["name"].as_str(), d["rcode"].as_str(), d["latency_ms"].as_f64(), d["transport"].as_str()), (Some("example.org"), Some("NOERROR"), Some(25.0), Some("udp")));
+        assert_eq!(d["answers"], serde_json::json!(["93.184.215.14"]));
+        assert_eq!(d["used_by"], serde_json::json!([]));
+        assert_eq!(d["ts_us"], us(T0));
+        assert!((d["ts"].as_i64().unwrap() - unix_now()).abs() < 5);
+        assert!(d.get("txid").is_none());
+
+        // An alert is journaled as served by the API, with its own packet-time `ts`.
+        let q = dns::parse(&dns::build_query(2, "x7k2p9q4m1v8b3n6c5z0w1.exfil.example", dns::TYPE_A)).unwrap();
+        s.record(us(T0 + 3), 90, Some(&pkt(ME, "1.1.1.1", 5001, 53, Proto::Dns, App::Dns(q))));
+        let recs = j.take_pending();
+        assert_eq!(recs.iter().map(|r| r.kind).collect::<Vec<_>>(), vec![Kind::Alerts]);
+        let a: serde_json::Value = serde_json::from_str(&recs[0].line).unwrap();
+        assert_eq!((a["kind"].as_str(), a["severity"].as_str(), a["ts"].as_i64(), a["id"].as_u64()), (Some("suspicious_dns"), Some("medium"), Some(T0 + 3), Some(1)));
+        assert_eq!(a["details"]["reason"], "entropy");
+        assert_eq!(recs[0].ts, T0 + 3);
+        // A suppressed repeat produces no record.
+        s.record(us(T0 + 4), 90, Some(&pkt(ME, "1.1.1.1", 5002, 53, Proto::Dns, App::Dns(dns::parse(&dns::build_query(3, "x7k2p9q4m1v8b3n6c5z0w1.exfil.example", dns::TYPE_A)).unwrap()))));
+        assert_eq!(j.pending(), 0);
+        // Without a journal nothing happens at all.
+        let mut plain = state();
+        plain.record(us(T0 + 3), 90, Some(&pkt(ME, "1.1.1.1", 5001, 53, Proto::Dns, App::Dns(dns::parse(&dns::build_query(2, "x7k2p9q4m1v8b3n6c5z0w1.exfil.example", dns::TYPE_A)).unwrap()))));
+        assert!(plain.journal().is_none() && plain.journal_remaining() == 0);
     }
 
     #[test]

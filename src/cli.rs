@@ -76,6 +76,20 @@ pub struct Args {
     #[arg(long)]
     pub no_state: bool,
 
+    /// Days of journal (finished connections, DNS lookups, alerts) kept on disk; 0 disables it
+    #[arg(long, value_name = "N", default_value_t = 1, value_parser = clap::value_parser!(u32).range(0..=365))]
+    pub journal_days: u32,
+
+    /// Directory of the journal files; live capture only unless given [default: <data dir>/journal]
+    #[arg(long, value_name = "DIR", conflicts_with = "no_journal", long_help = "Directory of the journal files (connections-<day>.jsonl, dns-<day>.jsonl, alerts-<day>.jsonl). \
+        Live capture writes the journal by default; with an explicit directory --demo and --read write one too.\n\nDefault: %LOCALAPPDATA%\\NetScope\\journal on Windows, \
+        $XDG_STATE_HOME/netscope/journal or ~/.local/state/netscope/journal elsewhere")]
+    pub journal_dir: Option<PathBuf>,
+
+    /// Write no journal
+    #[arg(long)]
+    pub no_journal: bool,
+
     /// More logging (-v debug, -vv trace); RUST_LOG overrides
     #[arg(short, long, action = ArgAction::Count)]
     pub verbose: u8,
@@ -120,5 +134,17 @@ mod tests {
         assert_eq!(a.state.as_deref(), Some(std::path::Path::new("x/state.json")));
         assert!(Args::try_parse_from(["netscope", "--no-state"]).unwrap().no_state);
         assert!(Args::try_parse_from(["netscope", "--no-state", "--state", "x"]).is_err(), "either, not both");
+    }
+
+    #[test]
+    fn journal_flags() {
+        let a = Args::try_parse_from(["netscope"]).unwrap();
+        assert_eq!((a.journal_days, a.journal_dir.as_deref(), a.no_journal), (1, None, false));
+        let a = Args::try_parse_from(["netscope", "--journal-days", "0", "--journal-dir", "j"]).unwrap();
+        assert_eq!((a.journal_days, a.journal_dir.as_deref()), (0, Some(std::path::Path::new("j"))));
+        assert!(Args::try_parse_from(["netscope", "--journal-days", "366"]).is_err());
+        assert!(Args::try_parse_from(["netscope", "--journal-days", "-1"]).is_err());
+        assert!(Args::try_parse_from(["netscope", "--no-journal"]).unwrap().no_journal);
+        assert!(Args::try_parse_from(["netscope", "--no-journal", "--journal-dir", "j"]).is_err(), "either, not both");
     }
 }

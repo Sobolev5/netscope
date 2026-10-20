@@ -101,6 +101,8 @@ pub struct Flow {
     pub retrans_in: u32,
     /// Segments advertising a zero receive window (a side cannot keep up).
     pub zero_window: u32,
+    /// Written to the journal already (a connection is journaled once).
+    pub journaled: bool,
     syn_us: Option<i64>,
     synack_us: Option<i64>,
     high_out: Option<u32>,
@@ -189,6 +191,8 @@ pub struct Observed {
     /// The flow got a name (SNI/Host/DNS question) with this packet.
     pub named: bool,
     pub rtt_us: Option<u32>,
+    /// This packet closed the connection (both FINs or a RST).
+    pub closed: bool,
 }
 
 impl FlowTable {
@@ -210,6 +214,11 @@ impl FlowTable {
 
     pub fn get(&self, id: u64) -> Option<&Flow> {
         self.by_id.get(&id).and_then(|k| self.flows.get(k))
+    }
+
+    pub fn get_mut(&mut self, id: u64) -> Option<&mut Flow> {
+        let k = *self.by_id.get(&id)?;
+        self.flows.get_mut(&k)
     }
 
     pub fn stored_bytes(&self) -> usize {
@@ -256,6 +265,7 @@ impl FlowTable {
                     retrans_out: 0,
                     retrans_in: 0,
                     zero_window: 0,
+                    journaled: false,
                     syn_us: None,
                     synack_us: None,
                     high_out: None,
@@ -284,6 +294,7 @@ impl FlowTable {
             f.app = info.proto;
         }
         let had_name = f.name.is_some();
+        let was_closed = f.state == FlowState::Closed;
         match &info.app {
             App::TlsHello(h) => {
                 if let Some(sni) = &h.sni {
@@ -346,7 +357,14 @@ impl FlowTable {
             }
         }
         f.next_n += 1;
-        Observed { id: f.id, created, process: f.process.as_ref().map(|p| p.pid), named: !had_name && f.name.is_some(), rtt_us: f.rtt_us }
+        Observed {
+            id: f.id,
+            created,
+            process: f.process.as_ref().map(|p| p.pid),
+            named: !had_name && f.name.is_some(),
+            rtt_us: f.rtt_us,
+            closed: !was_closed && f.state == FlowState::Closed,
+        }
     }
 
 
@@ -378,7 +396,9 @@ impl FlowTable {
     }
 
     /// Keeps the table and the packet store within limits, dropping least recent first.
-    pub fn evict(&mut self) {
+    /// Returns the connections removed from the table (for the journal).
+    pub fn evict(&mut self) -> Vec<Flow> {
+        let mut removed = Vec::new();
         if self.flows.len() > self.cap {
             let mut by_age: Vec<(i64, FlowKey)> = self.flows.values().map(|f| (f.last_us, f.key)).collect();
             by_age.sort_unstable_by_key(|x| x.0);
@@ -387,6 +407,7 @@ impl FlowTable {
                 if let Some(f) = self.flows.remove(&k) {
                     self.by_id.remove(&f.id);
                     self.stored -= f.stored_bytes();
+                    removed.push(f);
                 }
             }
         }
@@ -405,6 +426,7 @@ impl FlowTable {
                 }
             }
         }
+        removed
     }
 }
 

@@ -1,9 +1,75 @@
-# netscope
+<p align="center"><img src="docs/icon.png" width="96" alt="NetScope"></p>
+<h1 align="center">NetScope</h1>
+<p align="center"><b>See what your computer talks to.</b><br>
+A real-time network traffic analyzer for Windows: every connection attributed to the program that opened it,
+packets and streams like in Wireshark, TLS fingerprints, a DNS journal, geolocation on a zoomable map, route tracing,
+security alerts, Prometheus metrics and a journal on disk — in one small desktop app, written in Rust.</p>
 
-Real-time network traffic analyzer: captures packets, works out **what goes where**
-(per remote host, named via DNS answers, TLS SNI and HTTP `Host`), the protocol mix
-(HTTP, TLS, DNS, QUIC, TCP, UDP, ICMP) and raises **security alerts**, all shown on
-a live web dashboard embedded in the binary.
+<p align="center">
+<a href="https://github.com/Sobolev5/netscope/releases/latest"><img src="https://img.shields.io/github/v/release/Sobolev5/netscope?label=download&color=2563eb" alt="Latest release"></a>
+<img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4" alt="Windows 10/11 x64">
+<img src="https://img.shields.io/badge/rust-2021-f74c00?logo=rust" alt="Rust">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
+<img src="https://img.shields.io/badge/tests-283%20passing-brightgreen" alt="Tests">
+<img src="https://img.shields.io/badge/languages-EN%20%7C%20RU-8b5cf6" alt="English / Russian">
+</p>
+
+<p align="center"><img src="docs/screenshots/overview.png" width="900" alt="Overview"></p>
+
+## Download
+
+Grab the installer from the **[latest release](https://github.com/Sobolev5/netscope/releases/latest)**:
+
+| File | What it is |
+|---|---|
+| `NetScope-Setup-<version>.exe` (~3 MB) | The program. Downloads the WebView2 runtime and the geolocation databases during setup if they are missing. |
+| `NetScope-Setup-<version>-full.exe` (~300 MB) | Everything embedded for machines without internet: the program, the Microsoft Edge WebView2 runtime and the DB-IP Lite geolocation databases. |
+| `netscope-<version>-windows-x64.zip` | Portable: `netscope-app.exe` (desktop app), `netscope.exe` (console), `WebView2Loader.dll`, scripts. Unzip and run. |
+
+Live capture needs the **[Npcap](https://npcap.com)** driver (free; its license does not allow bundling it, so the installer
+offers to download it — keep *"WinPcap API-compatible Mode"* checked). Without Npcap, NetScope still opens capture files
+and runs the demo (`netscope --demo`). The binaries are not code-signed yet, so SmartScreen will ask once: *More info → Run anyway*.
+
+## Highlights
+
+* **Who talks to whom** — every connection attributed to its process (name, path, parent), grouped per program, with
+  the remote host named from DNS answers, TLS SNI or HTTP `Host`, its country/city/provider, hops and link quality.
+* **Wireshark in the browser** — packet list with one-line summaries, a packet inspector (Ethernet / IP / TCP·UDP /
+  DNS·HTTP·TLS fields with byte ranges and a hex dump), follow stream with TCP reassembly, `.pcap` export.
+* **Filters** such as `chrome tls`, `process == Code.exe and country != RU`, `bytes > 1MB and not signed`.
+* **TLS** — JA4 client fingerprints, SNI/ALPN, server version and cipher, certificate chain (TLS ≤ 1.2).
+* **DNS journal**, encrypted DNS (DoH/DoT/DoQ) detection, suspicious-name alerts (tunneling, exfiltration).
+* **Alerts** — credentials over HTTP, cleartext protocols, traffic spikes, programs going online for the first time,
+  new destinations/countries, new open ports, unsigned programs, route changes, latency increases.
+  Shown as Windows notifications by the desktop app.
+* **Where traffic goes** — an offline map with zoom and pan, the public exit address, VPN/proxy clients,
+  route tracing with watched routes.
+* **Journal on disk** — finished connections, DNS lookups and alerts kept for N days (default 1), searchable and
+  exportable as CSV/JSONL; **`/metrics`** for Prometheus; a full local JSON API.
+* **Settings page** in the app, RU/EN interface, no internet needed for anything but the optional checks.
+
+## Screenshots
+
+| Packet inspector | Map |
+|---|---|
+| ![Packet inspector](docs/screenshots/packet-inspector.png) | ![Map](docs/screenshots/map.png) |
+
+| Connections with a filter | Journal |
+|---|---|
+| ![Connections](docs/screenshots/connections.png) | ![Journal](docs/screenshots/journal.png) |
+
+| Settings and API | The desktop app |
+|---|---|
+| ![Settings](docs/screenshots/settings.png) | ![App window](docs/screenshots/app-window.png) |
+
+<details><summary>More: hosts, stream, phone layout</summary>
+
+![Hosts](docs/screenshots/hosts.png)
+![Stream](docs/screenshots/stream.png)
+<img src="docs/screenshots/mobile.png" width="300" alt="Phone layout">
+</details>
+
+## Command line
 
 ```
 netscope                       # capture on the best interface, dashboard on http://127.0.0.1:8888 (next free port if busy)
@@ -16,8 +82,8 @@ netscope -i 2 -f "tcp port 443 or udp port 53" --host 0.0.0.0 --port 9000
 
 ## Installing on Windows
 
-`dist\NetScope-Setup-<version>.exe` (built by `scripts\build-installer.ps1`, see
-[Build](#build)) installs NetScope like any other program — per user without
+`NetScope-Setup-<version>.exe` (from the [releases](https://github.com/Sobolev5/netscope/releases); built by
+`scripts\build-installer.ps1`, see [Build](#build)) installs NetScope like any other program — per user without
 administrator rights, or for all users when started elevated:
 
 * **NetScope** in the Start menu / on the desktop starts `netscope-app.exe`: a normal program
@@ -35,9 +101,10 @@ administrator rights, or for all users when started elevated:
   cloudflare.com.
 * **Settings** live in `%LOCALAPPDATA%\NetScope\netscope.ini` (`key=value`: `port`, `host`,
   `interface`, `filter`, `geoip`, `egress_check`, `promiscuous`, `verbose`, `show_window`
-  (0 = start hidden in the tray), `notifications` (`medium`, `high` or `off`)). The
-  dashboard's **Settings** page (`#/settings`) edits the same file: notifications and the
-  window option apply at once; changes to the capture (interface, filter, promiscuous mode),
+  (0 = start hidden in the tray), `notifications` (`medium`, `high` or `off`), `journal_days`
+  (days of journal kept, 0 = none)). The
+  dashboard's **Settings** page (`#/settings`) edits the same file: notifications, the
+  window option and the journal retention apply at once; changes to the capture (interface, filter, promiscuous mode),
   the dashboard address or port, the geolocation directory and logging take effect after a
   restart — "Restart now" on the page does it in the desktop app. Command-line arguments to
   `netscope-app.exe` replace the capture settings (the page says so). The log is
@@ -96,6 +163,17 @@ Memory: 4096 connections, 200 packets each, 96 MiB of stored frames at most.
   providers/countries) and slowdowns raise alerts.
 * **Exports**: CSV of connections (respects the filter), hosts, processes, DNS; `.pcap` of one
   connection or of every connection matching a filter — opens in Wireshark.
+* **Journal**: finished connections, DNS lookups and alerts are appended to
+  `<data dir>/journal/{connections,dns,alerts}-YYYY-MM-DD.jsonl` (one JSON object per line,
+  UTC days) during live capture, so what happened before the dashboard was opened — or
+  before the restart — can still be read. A connection is written once: when it is seen
+  closed, when it is dropped from memory, or at exit (`reason`: `closed`, `evicted`,
+  `shutdown`). Files older than `journal_days` (default 1, `--journal-days N`, 0 = off) are
+  deleted hourly; `--journal-dir DIR` moves the files (and makes `--demo`/`--read` write
+  them too), `--no-journal` switches the journal off. Query and download the journal with
+  `GET /api/journal` (JSON, JSON lines or CSV), see the API table.
+* **Prometheus** `/metrics`: traffic, connection, alert, DNS, per-program and per-country
+  counters (see [API](#api)).
 * **Languages**: Russian and English (switch in the header; `?lang=en` in the URL).
 
 ## Where traffic goes: geolocation, egress, route
@@ -171,8 +249,12 @@ Windows installer (needs [Inno Setup 6.1+](https://jrsoftware.org/isdl.php); `IS
 found in `PATH`, `%ISCC%` or the usual install folders):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1   # → dist\NetScope-Setup-<version>.exe
+powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1         # → dist\NetScope-Setup-<version>.exe
+powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1 -Full   # → …-full.exe with WebView2 + geodata embedded
 ```
+
+`-Full` downloads the WebView2 Evergreen standalone installer and the DB-IP Lite databases once into
+`installer\redist\` and embeds them, for machines without internet access.
 
 On Windows `build.rs` embeds the icon and version block with the toolchain's resource
 compiler (`windres` / `rc.exe`); without one the build still works, just without an icon.
@@ -232,8 +314,34 @@ option). Building with the `x86_64-pc-windows-gnu` toolchain also needs a full M
 | `GET /api/export/{connections,hosts,processes,dns}.csv` | CSV exports (`connections` takes `q=`, `pid=`) |
 | `GET /api/export/connections.pcap?q=` | stored packets of matching connections |
 | `GET /api/connections/{id}/pcap` | stored packets of one connection |
+| `GET /api/journal?kind=connections\|dns\|alerts&from=&to=&q=&limit=&format=json\|jsonl\|csv` | journal records, newest first: `{"kind","from","to","total","records":[…]}`; `from`/`to` unix seconds (default: the kept days), `q` case-insensitive text search, `limit` ≤ 5000 (default 500); `jsonl`/`csv` are downloads |
+| `GET /api/journal/stats` | journal files per day (`{"dir","days":[{"date","records":{"connections","dns","alerts"},"bytes"}],"bytes_total","days_kept","enabled","pending","dropped"}`) |
+| `GET /api/logs?lines=200` | the end of the program's log file (`{"file","lines"}`; `file` is `null` for the CLI, which logs to the console), at most 5000 lines |
+| `GET /api/settings` · `POST /api/settings` | the settings file, what is active, `journal` (`dir`, `days`, `enabled`) and `api` (`base`, `metrics`); `POST` saves a patch (`journal_days` applies at once) |
+| `GET /metrics` | Prometheus text exposition (not under `/api`, same `Host`/`Origin` checks) |
 | `WS /api/ws` | pushes the snapshot every second |
 
 Errors come back as `{"error":{"code":"bad_request|not_found|rate_limited|limit|filter|internal","message":"…"}}`
 (filter errors add `position`). The dashboard has no authentication: binding to anything but
 loopback logs a warning; requests from other web pages are rejected (`Host`/`Origin` checks).
+
+`/metrics` exposes `netscope_build_info{version}`, `netscope_up`, `netscope_uptime_seconds`,
+`netscope_bytes_total{direction}`, `netscope_packets_total{direction}`,
+`netscope_rate_bytes_per_second{direction}`, `netscope_connections{state="active|closed|total"}`,
+`netscope_hosts`, `netscope_alerts_total{severity}`, `netscope_dns_queries_total`,
+`netscope_dns_failures_total`, `netscope_process_bytes_total{process,direction}` (top 50
+programs), `netscope_country_bytes_total{country_code}`, `netscope_journal_records_total{kind}`
+and `netscope_journal_pending`. A scrape job for `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: netscope
+    static_configs:
+      - targets: ["127.0.0.1:8888"]
+```
+
+## Credits
+
+Built by [Andrey Sobolev](https://github.com/Sobolev5) together with [Claude](https://claude.com) (Anthropic).
+Geolocation data: [DB-IP Lite](https://db-ip.com) (CC BY 4.0). Map outlines: [Natural Earth](https://www.naturalearthdata.com).
+Packet capture: [Npcap](https://npcap.com) / libpcap. Dashboard engine: Microsoft Edge WebView2.

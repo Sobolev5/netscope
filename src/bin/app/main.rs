@@ -162,6 +162,9 @@ mod win {
         fn settings_path(&self) -> PathBuf {
             shared().ini()
         }
+        fn log_path(&self) -> Option<PathBuf> {
+            Some(shared().dir.join("netscope.log"))
+        }
     }
 
     fn shared() -> &'static Shared {

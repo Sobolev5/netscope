@@ -712,11 +712,15 @@ fn empty_state(source: &str) -> netscope::analytics::SharedState {
 /// A desktop-app-like host: records what the page asked for.
 struct TestHost {
     path: std::path::PathBuf,
+    log: Option<std::path::PathBuf>,
     autostart: std::sync::Mutex<bool>,
     restarts: std::sync::atomic::AtomicUsize,
 }
 
 impl netscope::settings::SettingsHost for TestHost {
+    fn log_path(&self) -> Option<std::path::PathBuf> {
+        self.log.clone()
+    }
     fn autostart(&self) -> Option<bool> {
         Some(*self.autostart.lock().unwrap())
     }
@@ -741,8 +745,12 @@ async fn settings_page_round_trip_validation_and_restart() {
     let dir = common::temp_path("settings-dir");
     let _ = std::fs::remove_dir_all(&dir);
     let ini = dir.join("netscope.ini");
-    let host = std::sync::Arc::new(TestHost { path: ini.clone(), autostart: std::sync::Mutex::new(false), restarts: Default::default() });
+    let host = std::sync::Arc::new(TestHost { path: ini.clone(), log: None, autostart: std::sync::Mutex::new(false), restarts: Default::default() });
     let shared = empty_state("replay.pcap");
+    // A live journal, so the retention can be changed from the page.
+    let journal_dir = dir.join("journal");
+    let journal = std::sync::Arc::new(netscope::analytics::Journal::new(&journal_dir, 1));
+    shared.write().set_journal(journal.clone());
     let listener = web::bind("127.0.0.1", 0).await.unwrap();
     let addr = web::local_addr(&listener).unwrap();
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
@@ -758,9 +766,11 @@ async fn settings_page_round_trip_validation_and_restart() {
     assert_eq!(v["file"], ini.display().to_string());
     let defaults = serde_json::json!({
         "port": null, "host": "127.0.0.1", "interface": null, "filter": null, "geoip": null,
-        "egress_check": true, "promiscuous": true, "verbose": false, "show_window": true, "notifications": "medium"
+        "egress_check": true, "promiscuous": true, "verbose": false, "show_window": true, "notifications": "medium", "journal_days": 1
     });
     assert_eq!(v["values"], defaults);
+    assert_eq!(v["journal"], serde_json::json!({ "dir": journal_dir.display().to_string(), "days": 1, "enabled": true }));
+    assert_eq!(v["api"], serde_json::json!({ "base": format!("http://127.0.0.1:{}", addr.port()), "metrics": "/metrics" }));
     let active = serde_json::json!({ "interface": "replay.pcap", "interface_description": null, "host": "127.0.0.1", "port": addr.port(), "mode": "file" });
     assert_eq!(v["active"], active);
     assert_eq!((v["autostart"].as_bool(), v["can_restart"].as_bool(), v["from_cli"].as_bool()), (Some(false), Some(true), Some(false)));
@@ -795,6 +805,25 @@ async fn settings_page_round_trip_validation_and_restart() {
     let (st, r) = post_json(addr, "/api/settings", "{}").await;
     assert_eq!((st, &r), (200, &serde_json::json!({ "saved": true, "restart_required": false })));
 
+    // The journal retention: saved to the file and applied to the running journal at once.
+    let (st, r) = post_json(addr, "/api/settings", r#"{"journal_days": 3}"#).await;
+    assert_eq!((st, &r), (200, &serde_json::json!({ "saved": true, "restart_required": false })));
+    assert!(std::fs::read_to_string(&ini).unwrap().contains("journal_days=3\r\n"));
+    assert_eq!(journal.retention_days(), 3);
+    let (_, body) = get(addr, "/api/settings").await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((v["values"]["journal_days"].as_u64(), v["journal"]["days"].as_u64(), v["journal"]["enabled"].as_bool()), (Some(3), Some(3), Some(true)));
+    let (st, body) = get(addr, "/api/journal/stats").await;
+    assert_eq!(st, 200, "{body}");
+    let stats: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((stats["days_kept"].as_u64(), stats["enabled"].as_bool(), stats["pending"].as_u64(), stats["dropped"].as_u64()), (Some(3), Some(true), Some(0), Some(0)));
+    assert_eq!((stats["dir"].as_str(), stats["bytes_total"].as_u64(), stats["days"].as_array().map(Vec::len)), (Some(journal_dir.display().to_string().as_str()), Some(0), Some(0)));
+    let (st, r) = post_json(addr, "/api/settings", r#"{"journal_days": 0}"#).await;
+    assert_eq!(st, 200, "{r}");
+    assert!(!journal.enabled());
+    let (_, body) = get(addr, "/api/settings").await;
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["journal"]["enabled"], false);
+
     // Validation: 400 naming the field, and the file stays as it was.
     let before = std::fs::read_to_string(&ini).unwrap();
     let bad = [
@@ -805,6 +834,8 @@ async fn settings_page_round_trip_validation_and_restart() {
         (r#"{"host": "127.0.0.1:80"}"#, "host"),
         (r#"{"notifications": "loud"}"#, "notifications"),
         (r#"{"verbose": "yes"}"#, "verbose"),
+        (r#"{"journal_days": 366}"#, "journal_days"),
+        (r#"{"journal_days": -1}"#, "journal_days"),
         ("not json", "settings"),
         ("", "settings"),
     ];
@@ -867,6 +898,239 @@ async fn settings_page_without_a_host() {
     assert_eq!(st, 200);
     assert!(serde_json::from_str::<serde_json::Value>(&body).unwrap().is_array());
 
+    // No host, no log file; no journal attached: stats are those of the default directory.
+    let (st, body) = get(addr, "/api/logs").await;
+    assert_eq!((st, body.as_str()), (200, r#"{"file":null,"lines":[]}"#));
+    let (st, body) = get(addr, "/api/journal/stats").await;
+    assert_eq!(st, 200, "{body}");
+    let stats: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(stats["enabled"], false);
+    assert!(stats["dir"].as_str().unwrap().ends_with("journal"), "{stats}");
+    assert!(v["journal"]["dir"] == stats["dir"] && v["journal"]["enabled"] == false, "{v}");
+
     stop_tx.send(()).unwrap();
     server.await.unwrap().unwrap();
+}
+
+// ----- journal, metrics, logs -----
+
+/// A replayed capture with a journal: closed connections are journaled during the replay,
+/// the rest by the shutdown step; then the files are queried through the API.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn journal_endpoints_after_a_replay_and_a_forced_shutdown() {
+    use netscope::analytics::journal::{self, Kind};
+    use netscope::analytics::Journal;
+    let dir = common::temp_path("journal-replay");
+    let _ = std::fs::remove_dir_all(&dir);
+    let journal = std::sync::Arc::new(Journal::new(&dir, 2));
+    let shared = empty_state("journal.pcap");
+    shared.write().set_journal(journal.clone());
+    let path = common::demo_pcap("journal.pcap", 15);
+    let shared = tokio::task::spawn_blocking({
+        let (path, shared) = (path.clone(), shared.clone());
+        move || common::replay_into(&path, shared)
+    })
+    .await
+    .unwrap();
+    std::fs::remove_file(&path).ok();
+    let (flows, closed_in_memory) = {
+        let st = shared.read();
+        (st.flows().count(), st.flows().filter(|f| f.journaled).count())
+    };
+    assert!(closed_in_memory > 0 && closed_in_memory < flows, "some demo connections close during the replay: {closed_in_memory} of {flows}");
+    let pending_before = journal.pending();
+    assert!(pending_before >= closed_in_memory);
+    // The program's shutdown step: the open connections, then the writer drains and stops.
+    assert_eq!(shared.write().journal_remaining(), flows - closed_in_memory);
+    assert_eq!(shared.write().journal_remaining(), 0);
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let writer = journal::spawn_writer(journal.clone(), stop).unwrap();
+    tokio::task::spawn_blocking(move || writer.join().unwrap()).await.unwrap();
+    assert_eq!(journal.pending(), 0);
+    assert_eq!(journal.written(Kind::Connections) as usize, flows, "one record per connection");
+    assert!(journal.written(Kind::Dns) > 0 && journal.written(Kind::Alerts) > 0);
+
+    let (addr, stop_tx, server) = serve(shared.clone()).await;
+
+    // JSON: the default window (today and the kept days) holds every connection record.
+    let (st, body) = get(addr, "/api/journal?kind=connections").await;
+    assert_eq!(st, 200, "{body}");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((v["kind"].as_str(), v["total"].as_u64()), (Some("connections"), Some(flows as u64)));
+    let records = v["records"].as_array().unwrap();
+    assert_eq!(records.len(), flows.min(500));
+    let now = netscope::capture::engine::unix_now();
+    assert!(v["from"].as_i64().unwrap() <= now - 2 * 86_400 && v["to"].as_i64().unwrap() >= now - 5, "{v}");
+    let mut ids: Vec<u64> = records.iter().map(|r| r["id"].as_u64().unwrap()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), records.len(), "no connection twice");
+    for r in records {
+        assert!(matches!(r["reason"].as_str(), Some("closed" | "shutdown")), "{r}");
+        assert!((r["ts"].as_i64().unwrap() - now).abs() < 60, "{r}");
+        for key in ["first_us", "last_us", "l4", "app", "local", "remote", "remote_ip", "bytes_in", "bytes_out", "packets_in", "packets_out", "state"] {
+            assert!(!r[key].is_null(), "{key} in {r}");
+        }
+        assert!(r.get("process").is_some() && r.get("geo").is_some() && r.get("tls").is_some(), "{r}");
+    }
+    if records.len() == flows {
+        assert_eq!(records.iter().filter(|r| r["reason"] == "closed").count(), closed_in_memory);
+    }
+    assert!(records.windows(2).all(|w| w[0]["ts"].as_i64() >= w[1]["ts"].as_i64()), "newest first");
+    // Search, paging.
+    // (A replayed file has no process table, so the search uses a remote address; the text
+    // search covers the whole JSON line, case-insensitively.)
+    let ip = records[0]["remote_ip"].as_str().unwrap().to_string();
+    let (_, body) = get(addr, &format!("/api/journal?kind=connections&q={}&limit=2", ip.replace("a", "A").replace("e", "E"))).await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let total = v["total"].as_u64().unwrap();
+    assert!(total > 0 && total < flows as u64, "{ip}: {total}");
+    assert_eq!(v["records"].as_array().unwrap().len(), 2.min(total as usize));
+    assert!(v["records"].as_array().unwrap().iter().all(|r| r.to_string().contains(&ip)));
+    assert!(records.iter().all(|r| r["process"].is_null()), "a replayed file has no process table");
+    let (_, body) = get(addr, "/api/journal?kind=connections&q=no-such-thing-anywhere").await;
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["total"], 0);
+    // DNS records today; alerts carry the capture's own (old) time, so the default window misses them.
+    let (_, body) = get(addr, "/api/journal?kind=dns").await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["total"].as_u64(), Some(journal.written(Kind::Dns)));
+    let d = &v["records"][0];
+    assert!(d["name"].is_string() && d["ts_us"].is_i64() && d["answers"].is_array() && d["used_by"].is_array() && d["ts"].is_i64(), "{d}");
+    let (_, body) = get(addr, "/api/journal?kind=alerts").await;
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["total"], 0);
+    let (_, body) = get(addr, &format!("/api/journal?kind=alerts&from=0&to={}", common::START_US / 1_000_000 + 100)).await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["total"].as_u64(), Some(journal.written(Kind::Alerts)));
+    let a = &v["records"][0];
+    assert!(a["kind"].is_string() && a["severity"].is_string() && a["message"].is_string() && a["details"].is_object(), "{a}");
+    assert!((common::START_US / 1_000_000..common::START_US / 1_000_000 + 100).contains(&a["ts"].as_i64().unwrap()), "{a}");
+
+    // Downloads.
+    let (st, head, body) = request(addr, "GET", "/api/journal?kind=connections&format=csv&limit=10").await;
+    assert_eq!(st, 200);
+    assert!(head.contains("text/csv") && head.contains("attachment; filename=\"netscope-connections-"), "{head}");
+    let text = String::from_utf8(body).unwrap();
+    let lines: Vec<&str> = text.trim_start_matches('\u{feff}').lines().collect();
+    assert_eq!(lines.len(), 11, "header plus ten rows");
+    assert!(lines[0].starts_with("ts,time_utc,first_us,last_us,id,process.pid,process.name,process.path,l4,app,local,remote,remote_ip,name,geo.country_code,"));
+    assert!(lines[0].ends_with(",tls.sni,tls.version,tls.alpn,tls.ja4,rtt_ms,retrans,hops,reason"));
+    assert!(lines[1].ends_with(",closed") || lines[1].ends_with(",shutdown"), "{}", lines[1]);
+    let (st, head, body) = request(addr, "GET", "/api/journal?kind=dns&format=jsonl&limit=3").await;
+    assert_eq!(st, 200);
+    assert!(head.contains("application/x-ndjson") && head.contains("filename=\"netscope-dns-") && head.contains(".jsonl\""), "{head}");
+    let text = String::from_utf8(body).unwrap();
+    assert_eq!(text.lines().count(), 3);
+    for l in text.lines() {
+        assert!(serde_json::from_str::<serde_json::Value>(l).unwrap()["name"].is_string());
+    }
+
+    // Stats: today's file set, nothing queued.
+    let (st, body) = get(addr, "/api/journal/stats").await;
+    assert_eq!(st, 200, "{body}");
+    let s: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((s["dir"].as_str(), s["days_kept"].as_u64(), s["enabled"].as_bool(), s["pending"].as_u64(), s["dropped"].as_u64()), (Some(dir.display().to_string().as_str()), Some(2), Some(true), Some(0), Some(0)));
+    let days = s["days"].as_array().unwrap();
+    assert_eq!(days.len(), 2, "today (connections, dns) and the capture's day (alerts): {s}");
+    assert_eq!(days[0]["date"], journal::date_string(now.div_euclid(86_400)));
+    assert_eq!(days[0]["records"]["connections"].as_u64(), Some(flows as u64));
+    assert_eq!(days[0]["records"]["dns"].as_u64(), Some(journal.written(Kind::Dns)));
+    assert_eq!(days[1]["records"]["alerts"].as_u64(), Some(journal.written(Kind::Alerts)));
+    assert_eq!(s["bytes_total"].as_u64().unwrap(), days.iter().map(|d| d["bytes"].as_u64().unwrap()).sum::<u64>());
+    assert!(s["bytes_total"].as_u64().unwrap() > 1000);
+
+    // Errors in the usual envelope.
+    for (path, word) in [("/api/journal", "kind"), ("/api/journal?kind=hosts", "kind"), ("/api/journal?kind=dns&format=xml", "format"), ("/api/journal?kind=dns&from=10&to=5", "from"), ("/api/journal?kind=dns&limit=x", "limit")] {
+        let (st, body) = get(addr, path).await;
+        assert_eq!(st, 400, "{path}: {body}");
+        let e: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(e["error"]["message"].as_str().unwrap().contains(word), "{path}: {body}");
+    }
+
+    // Metrics after the replay.
+    let (st, head, body) = request(addr, "GET", "/metrics").await;
+    assert_eq!(st, 200);
+    assert!(head.contains("text/plain; version=0.0.4"), "{head}");
+    let text = String::from_utf8(body).unwrap();
+    assert!(text.contains(&format!("netscope_journal_records_total{{kind=\"connections\"}} {flows}\n")), "{text}");
+    assert!(text.contains("netscope_journal_pending 0\n"));
+    assert!(text.contains("netscope_up 0\n"), "finished capture");
+    assert!(text.contains(&format!("netscope_connections{{state=\"total\"}} {flows}\n")));
+    assert!(text.contains("# TYPE netscope_process_bytes_total counter\n"));
+    assert!(text.contains("netscope_dns_queries_total ") && text.contains("netscope_alerts_total{severity=\"high\"} "));
+    let totals: serde_json::Value = serde_json::from_str(&get(addr, "/api/stats").await.1).unwrap();
+    assert!(text.contains(&format!("netscope_bytes_total{{direction=\"in\"}} {}\n", totals["totals"]["bytes_in"])));
+    assert!(text.contains(&format!("netscope_packets_total{{direction=\"out\"}} {}\n", totals["totals"]["packets_out"])));
+
+    stop_tx.send(()).unwrap();
+    server.await.unwrap().unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn metrics_escape_labels_and_sit_behind_the_guard() {
+    use netscope::decode::{decode, linktype};
+    use netscope::demo::frames::{tcp_frame, TcpFlags};
+    use netscope::procs::{OsSnapshot, OwnerIndex, ProcInfo, SockProto, SocketEntry};
+    let shared = empty_state("metrics.pcap");
+    {
+        let mut st = shared.write();
+        let mut procs = std::collections::HashMap::new();
+        procs.insert(7, ProcInfo { pid: 7, name: "say \"hi\"\\there.exe".into(), path: None, parent: None });
+        let sock = SocketEntry { proto: SockProto::Tcp, local: "10.0.0.2:5000".parse().unwrap(), remote: Some("93.184.215.14:80".parse().unwrap()), state: Some("ESTABLISHED"), pid: 7 };
+        st.set_owners(std::sync::Arc::new(OwnerIndex::new(OsSnapshot { sockets: vec![sock], procs, error: None })));
+        let f = tcp_frame([10, 0, 0, 2], [93, 184, 215, 14], 5000, 80, TcpFlags::Data, b"hello");
+        st.record_frame(common::START_US, f.len() as u32, &f, decode(linktype::ETHERNET, &f).as_ref());
+    }
+    let (addr, stop_tx, server) = serve(shared).await;
+    let (st, body) = get(addr, "/metrics").await;
+    assert_eq!(st, 200);
+    let line = body.lines().find(|l| l.starts_with("netscope_process_bytes_total{process=\"say \\\"hi\\\"\\\\there.exe\",direction=\"out\"} ")).unwrap_or_else(|| panic!("{body}"));
+    assert!(line.rsplit(' ').next().unwrap().parse::<u64>().unwrap() > 50, "{line}");
+    assert!(body.contains("netscope_build_info{version=\"") && body.contains("netscope_connections{state=\"active\"} 1\n"), "{body}");
+    assert!(body.contains("# HELP netscope_bytes_total ") && body.contains("# TYPE netscope_bytes_total counter\n"));
+    // Not under /api, but the same protection against other web pages.
+    assert_eq!(raw(addr, "GET /metrics HTTP/1.1\r\nHost: evil.example\r\nConnection: close\r\n\r\n").await, 403);
+    assert_eq!(raw(addr, "GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nSec-Fetch-Site: cross-site\r\nConnection: close\r\n\r\n").await, 403);
+    assert_eq!(raw(addr, "GET /metrics HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await, 200);
+    stop_tx.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logs_endpoint_with_a_host() {
+    let dir = common::temp_path("logs-dir");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("netscope.log");
+    let host = std::sync::Arc::new(TestHost { path: dir.join("netscope.ini"), log: Some(log.clone()), autostart: std::sync::Mutex::new(false), restarts: Default::default() });
+    let shared = empty_state("logs.pcap");
+    let listener = web::bind("127.0.0.1", 0).await.unwrap();
+    let addr = web::local_addr(&listener).unwrap();
+    let (stop_tx, stop_rx) = oneshot::channel::<()>();
+    let server = tokio::spawn(web::run_with_host(listener, shared, false, async move { let _ = stop_rx.await; }, Some(host)));
+
+    // The path is known but the file is not there yet.
+    let (st, body) = get(addr, "/api/logs").await;
+    assert_eq!(st, 200, "{body}");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((v["file"].as_str(), v["lines"].as_array().map(Vec::len)), (Some(log.display().to_string().as_str()), Some(0)));
+
+    let text: String = (1..=300).map(|i| format!("2026-10-20T10:00:{:02}Z  INFO line {i}\n", i % 60)).collect();
+    std::fs::write(&log, &text).unwrap();
+    let (_, body) = get(addr, "/api/logs").await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let lines = v["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 200, "default");
+    assert!(lines[0].as_str().unwrap().ends_with("line 101") && lines[199].as_str().unwrap().ends_with("line 300"));
+    let (_, body) = get(addr, "/api/logs?lines=5").await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["lines"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().rsplit(' ').next().unwrap()).collect::<Vec<_>>(), ["296", "297", "298", "299", "300"]);
+    let (_, body) = get(addr, "/api/logs?lines=99999").await;
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["lines"].as_array().unwrap().len(), 300, "capped at 5000, so all of them");
+    let (st, body) = get(addr, "/api/logs?lines=x").await;
+    assert_eq!(st, 400, "{body}");
+
+    stop_tx.send(()).unwrap();
+    server.await.unwrap().unwrap();
+    std::fs::remove_dir_all(&dir).ok();
 }

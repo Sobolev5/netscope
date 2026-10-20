@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use crate::analytics::{persist, CaptureInfo, CaptureStatus, Config, SharedState, State};
+use crate::analytics::{journal, persist, CaptureInfo, CaptureStatus, Config, Journal, SharedState, State};
 use crate::capture::engine::{self, Pacing};
 use crate::capture::file::{is_pcapng_error, PcapFile};
 use crate::capture::live::{default_route_ip, score, select_device, LiveOptions, Pcap};
@@ -156,6 +156,15 @@ pub fn state_path(args: &Args) -> Option<PathBuf> {
     Some(args.state.clone().unwrap_or_else(|| data_dir().join("state.json")))
 }
 
+/// Where the journal is written for these arguments: `None` with `--no-journal`, and for
+/// the demo and replayed files unless `--journal-dir` names a place for them.
+pub fn journal_dir(args: &Args, live_capture: bool) -> Option<PathBuf> {
+    if args.no_journal || !(live_capture || args.journal_dir.is_some()) {
+        return None;
+    }
+    Some(args.journal_dir.clone().unwrap_or_else(|| data_dir().join("journal")))
+}
+
 /// Runs until Ctrl+C.
 pub fn run(args: Args) -> Result<()> {
     run_with(args, shutdown_signal(), |_| {})
@@ -212,6 +221,13 @@ pub fn run_with_host(
             Err(e) => tracing::warn!("cannot load the saved state, starting fresh: {e}"),
         }
     }
+    let journal = journal_dir(&args, live_capture).map(|dir| {
+        tracing::info!("journal: {} ({} day(s) kept)", dir.display(), args.journal_days);
+        Arc::new(Journal::new(dir, args.journal_days))
+    });
+    if let Some(j) = &journal {
+        state.set_journal(j.clone());
+    }
     let shared = SharedState::new(state);
     let stop = Arc::new(AtomicBool::new(false));
     let pacing = if args.realtime { Pacing::Realtime } else { Pacing::Fast };
@@ -238,6 +254,13 @@ pub fn run_with_host(
     let save_stop = Arc::new(AtomicBool::new(false));
     let saver = match &state_file {
         Some(path) => Some(persist::spawn_saver(shared.clone(), path.clone(), save_stop.clone(), loaded, persist::SAVE_INTERVAL).context("starting state saver")?),
+        None => None,
+    };
+    // Same arrangement for the journal: its last batch (the connections still open at the
+    // end) is produced after the capture thread is gone, then the writer is stopped.
+    let journal_stop = Arc::new(AtomicBool::new(false));
+    let journal_writer = match &journal {
+        Some(j) => Some(journal::spawn_writer(j.clone(), journal_stop.clone()).context("starting journal writer")?),
         None => None,
     };
 
@@ -272,6 +295,16 @@ pub fn run_with_host(
     if let Some(h) = saver {
         if h.join().is_err() {
             tracing::error!("state saver panicked");
+        }
+    }
+    if journal.is_some() {
+        let n = shared.write().journal_remaining();
+        tracing::debug!("{n} open connection(s) journaled at shutdown");
+    }
+    journal_stop.store(true, Ordering::Relaxed);
+    if let Some(h) = journal_writer {
+        if h.join().is_err() {
+            tracing::error!("journal writer panicked");
         }
     }
     // The helpers may be inside slow blocking calls (a signature check, a traceroute, a
@@ -402,6 +435,14 @@ mod tests {
         assert_eq!(state_path(&a), Some(PathBuf::from("custom.json")));
         let a = Args::try_parse_from(["netscope", "--no-state"]).unwrap();
         assert_eq!(state_path(&a), None);
+        // The journal: live by default, the demo/a file only with an explicit directory.
+        let a = Args::try_parse_from(["netscope"]).unwrap();
+        assert_eq!(journal_dir(&a, true), Some(d.join("journal")));
+        assert_eq!(journal_dir(&a, false), None);
+        let a = Args::try_parse_from(["netscope", "--journal-dir", "j"]).unwrap();
+        assert_eq!((journal_dir(&a, true), journal_dir(&a, false)), (Some(PathBuf::from("j")), Some(PathBuf::from("j"))));
+        let a = Args::try_parse_from(["netscope", "--no-journal"]).unwrap();
+        assert_eq!((journal_dir(&a, true), journal_dir(&a, false)), (None, None));
     }
 
     #[test]
@@ -410,7 +451,11 @@ mod tests {
         let state_file = std::env::temp_dir().join(format!("netscope-app-{}-demo-state.json", std::process::id()));
         let _ = std::fs::remove_file(&state_file);
         let state_arg = state_file.to_str().unwrap().to_owned();
-        let args = Args::try_parse_from(["netscope", "--demo", "--port", "0", "--no-egress-check", "--geoip", "definitely/missing", "--state", &state_arg]).unwrap();
+        // With an explicit directory the demo keeps a journal (its writer creates the directory).
+        let journal_dir = std::env::temp_dir().join(format!("netscope-app-{}-demo-journal", std::process::id()));
+        let _ = std::fs::remove_dir_all(&journal_dir);
+        let journal_arg = journal_dir.to_str().unwrap().to_owned();
+        let args = Args::try_parse_from(["netscope", "--demo", "--port", "0", "--no-egress-check", "--geoip", "definitely/missing", "--state", &state_arg, "--journal-dir", &journal_arg]).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let t = Instant::now();
         let r = run_with(args, async {}, move |addr| {
@@ -421,6 +466,8 @@ mod tests {
         assert!(addr.ip().is_loopback() && addr.port() != 0, "{addr}");
         assert!(t.elapsed() < Duration::from_secs(8), "took {:?}", t.elapsed());
         assert!(!state_file.exists(), "--demo must not write a state file");
+        assert!(journal_dir.is_dir(), "the journal directory is created at start");
+        std::fs::remove_dir_all(&journal_dir).ok();
         // A source that cannot be opened fails before anything listens.
         let args = Args::try_parse_from(["netscope", "--read", "definitely-missing.pcap"]).unwrap();
         let (tx, rx) = std::sync::mpsc::channel::<SocketAddr>();

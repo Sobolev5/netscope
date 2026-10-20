@@ -177,6 +177,12 @@ const I18N = {
     set_geo: "Геоданные", set_geo_on: "базы загружены из {dir}", set_geo_off: "не найдены", set_active: "Сейчас работает", set_mode: "режим",
     set_save: "Сохранить", set_saved: "Сохранено", set_restart_needed: "Чтобы изменения вступили в силу, нужен перезапуск.", set_restart_now: "Перезапустить сейчас", set_restarting: "перезапуск… страница обновится сама", set_restart_manual: "Перезапусти NetScope вручную.", set_restart_fail: "Перезапуск не удался: {e}",
     set_loading: "загрузка настроек…", set_cli_note: "Запущено с параметрами командной строки — они имеют приоритет над файлом.",
+    nav_journal: "Журнал", journal: "Журнал", j_hint: "завершённые соединения, DNS-запросы и предупреждения за последние дни — с диска", j_connections: "Соединения", j_dns: "DNS", j_alerts: "Предупреждения", j_log: "Лог программы",
+    j_today: "сегодня", j_3d: "3 дня", j_7d: "7 дней", j_all: "всё", j_search_ph: "поиск по любому полю…", j_records: "{n} из {t}", j_empty: "записей нет", j_disabled: "журнал выключен — задайте срок хранения в настройках", j_kept: "хранится {d} дн.",
+    j_export_csv: "CSV", j_export_jsonl: "JSONL", j_refresh: "обновить", j_reason: "Причина", j_reason_closed: "закрыто", j_reason_evicted: "вытеснено из памяти", j_reason_shutdown: "остановка программы", j_duration: "Длительность", j_log_none: "лог-файла нет (запуск из консоли — лог идёт в stderr)", j_log_file: "файл",
+    set_api: "API и журнал", set_api_base: "Адрес API", set_api_hint: "Все ручки доступны только с этого компьютера без пароля; запросы с других сайтов отклоняются. Данные отдаются в JSON, выгрузки — в CSV/JSONL.", set_copy: "копировать", set_copied: "скопировано",
+    set_endpoints: "Основные ручки", set_prom: "Сбор метрик Prometheus (prometheus.yml)", set_journal_days: "Хранить журналы, дней (0 — выключить)", set_journal_stats: "{n} записей, {b}, папка {dir}", set_applies_now: "применяется сразу",
+    ep_stats: "сводка: трафик, хосты, соединения, предупреждения", ep_connections: "соединения (фильтр q=, pid=)", ep_journal: "журнал: kind=connections|dns|alerts, from=, to=, q=, format=json|csv|jsonl", ep_metrics: "метрики в формате Prometheus", ep_logs: "последние строки лога программы", ep_export: "выгрузка CSV / pcap",
     alert_sensitive_http: "Незашифрованный HTTP {method} {url} передаёт: {data}",
     alert_dns_long_name: "DNS-запрос {domain}: очень длинное имя ({value} симв.) — похоже на DNS-туннель",
     alert_dns_long_label: "DNS-запрос {domain}: слишком длинная метка ({value} симв.)",
@@ -253,6 +259,12 @@ const I18N = {
     set_geo: "Geolocation data", set_geo_on: "databases loaded from {dir}", set_geo_off: "not found", set_active: "Running now", set_mode: "mode",
     set_save: "Save", set_saved: "Saved", set_restart_needed: "A restart is needed for the changes to take effect.", set_restart_now: "Restart now", set_restarting: "restarting… the page reloads by itself", set_restart_manual: "Restart NetScope by hand.", set_restart_fail: "Restart failed: {e}",
     set_loading: "loading settings…", set_cli_note: "Started with command-line arguments — they take precedence over the file.",
+    nav_journal: "Journal", journal: "Journal", j_hint: "finished connections, DNS lookups and alerts of the last days — from disk", j_connections: "Connections", j_dns: "DNS", j_alerts: "Alerts", j_log: "Program log",
+    j_today: "today", j_3d: "3 days", j_7d: "7 days", j_all: "all", j_search_ph: "search any field…", j_records: "{n} of {t}", j_empty: "no records", j_disabled: "the journal is off — set a retention period in Settings", j_kept: "kept for {d} days",
+    j_export_csv: "CSV", j_export_jsonl: "JSONL", j_refresh: "refresh", j_reason: "Reason", j_reason_closed: "closed", j_reason_evicted: "evicted from memory", j_reason_shutdown: "program stopped", j_duration: "Duration", j_log_none: "no log file (console run — the log goes to stderr)", j_log_file: "file",
+    set_api: "API and journal", set_api_base: "API address", set_api_hint: "Every endpoint is reachable from this computer only, without a password; requests from other web sites are rejected. Data is JSON, exports are CSV/JSONL.", set_copy: "copy", set_copied: "copied",
+    set_endpoints: "Main endpoints", set_prom: "Prometheus scraping (prometheus.yml)", set_journal_days: "Keep journals for, days (0 — off)", set_journal_stats: "{n} records, {b}, folder {dir}", set_applies_now: "applies at once",
+    ep_stats: "summary: traffic, hosts, connections, alerts", ep_connections: "connections (filter q=, pid=)", ep_journal: "journal: kind=connections|dns|alerts, from=, to=, q=, format=json|csv|jsonl", ep_metrics: "metrics in Prometheus format", ep_logs: "last lines of the program log", ep_export: "CSV / pcap exports",
     alert_sensitive_http: "Unencrypted HTTP {method} {url} carries: {data}",
     alert_dns_long_name: "DNS query {domain}: very long name ({value} chars) — looks like DNS tunneling",
     alert_dns_long_label: "DNS query {domain}: oversized label ({value} chars)",
@@ -392,7 +404,8 @@ const ui = {
   // Map viewports per map (null = whole world), collapsed inspector layers, request sequencing.
   mapViews: {}, mapDrag: null, renderPending: false, closedLayers: new Set(), seq: { detail: 0, packet: 0, conns: 0, dns: 0, watch: 0 },
   // Settings page: what the server reported, the form as edited, the outcome of the last save.
-  settings: { data: null, interfaces: null, form: null, status: null, saving: false, restarting: false },
+  settings: { data: null, interfaces: null, form: null, status: null, saving: false, restarting: false, jstats: null },
+  journal: { kind: "connections", range: "today", q: "", data: null, stats: null, log: null, error: null, seq: 0 },
 };
 let pollTimer = null, connCache = null, sockCache = null, worldRings = null, worldFailed = false, connState = "offline";
 
@@ -424,9 +437,10 @@ const ICONS = {
   dns: '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/>',
   sockets: '<path d="M8 3v5M16 3v5M5 8h14v4a7 7 0 0 1-14 0zM12 19v2"/>',
   alerts: '<path d="M12 3l9 16H3zM12 10v4M12 17v.5"/>',
+  journal: '<path d="M4 4h12l4 4v12H4z"/><path d="M16 4v4h4M8 12h8M8 16h8"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
 };
-const NAV = ["overview", "processes", "connections", "hosts", "map", "route", "dns", "sockets", "alerts", "settings"];
+const NAV = ["overview", "processes", "connections", "hosts", "map", "route", "dns", "sockets", "alerts", "journal", "settings"];
 
 function renderNav() {
   const active = route.name === "conn" ? "connections" : route.name;
@@ -1034,7 +1048,8 @@ async function loadSettings() {
     const d = await getJson("/api/settings");
     st.data = d;
     const v = d.values;
-    st.form = { port: v.port === null ? "" : String(v.port), host: v.host || "127.0.0.1", interface: v.interface || "", filter: v.filter || "", promiscuous: !!v.promiscuous, verbose: !!v.verbose, egress_check: !!v.egress_check, show_window: !!v.show_window, notifications: v.notifications || "medium", autostart: d.autostart };
+    st.form = { port: v.port === null ? "" : String(v.port), host: v.host || "127.0.0.1", interface: v.interface || "", filter: v.filter || "", promiscuous: !!v.promiscuous, verbose: !!v.verbose, egress_check: !!v.egress_check, show_window: !!v.show_window, notifications: v.notifications || "medium", autostart: d.autostart, journal_days: String(v.journal_days ?? 1) };
+    getJson("/api/journal/stats").then((j) => { st.jstats = j; if (route.name === "settings") renderView(); }).catch(() => {});
   } catch (e) { st.status = { error: String(e.message || e) }; }
   if (route.name === "settings") renderView();
   if (st.interfaces === null) {
@@ -1047,7 +1062,7 @@ async function saveSettings() {
   const st = ui.settings, f = st.form;
   if (!f || st.saving) return;
   st.saving = true; st.status = null; renderView();
-  const body = { port: f.port.trim() === "" ? null : Number(f.port), port_auto: f.port.trim() === "", host: f.host.trim(), interface: f.interface, filter: f.filter.trim(), promiscuous: f.promiscuous, verbose: f.verbose, egress_check: f.egress_check, show_window: f.show_window, notifications: f.notifications };
+  const body = { port: f.port.trim() === "" ? null : Number(f.port), port_auto: f.port.trim() === "", host: f.host.trim(), interface: f.interface, filter: f.filter.trim(), promiscuous: f.promiscuous, verbose: f.verbose, egress_check: f.egress_check, show_window: f.show_window, notifications: f.notifications, journal_days: Number(f.journal_days) };
   if (st.data && st.data.autostart !== null && st.data.autostart !== undefined) body.autostart = !!f.autostart;
   try {
     const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -1107,12 +1122,95 @@ function viewSettings() {
     <tr><td class="text-slate-500">${t("set_dashboard")}</td><td class="mono">${esc(a.host || "")}:${esc(a.port || "")}</td></tr>
     <tr><td class="text-slate-500">${t("set_mode")}</td><td>${esc(a.mode || "")}</td></tr>
     <tr><td class="text-slate-500">${t("set_file")}</td><td class="mono break-all">${esc(d.file || "—")}</td></tr></tbody></table>${d.from_cli ? `<div class="mt-2 text-[12px] text-amber-700">${t("set_cli_note")}</div>` : ""}`);
+  // API: where the program listens and how to pull data out of it (Prometheus, scripts).
+  const base = (d.api && d.api.base) || location.origin;
+  const eps = [["/api/stats", "ep_stats"], ["/api/connections", "ep_connections"], ["/api/journal?kind=connections", "ep_journal"], ["/metrics", "ep_metrics"], ["/api/logs?lines=200", "ep_logs"], ["/api/export/connections.csv", "ep_export"]];
+  const copyBtn = (text) => `<button type="button" class="btn" data-copy="${esc(text)}">${t("set_copy")}</button>`;
+  const prom = `scrape_configs:\n  - job_name: netscope\n    scrape_interval: 15s\n    static_configs:\n      - targets: ["${base.replace(/^https?:\/\//, "")}"]`;
+  const js = st.jstats;
+  const jstat = js ? t("set_journal_stats", { n: fmtNum((js.days || []).reduce((a, x) => a + (x.records.connections || 0) + (x.records.dns || 0) + (x.records.alerts || 0), 0)), b: fmtBytes(js.bytes_total || 0), dir: `<span class="mono">${esc(js.dir || "")}</span>` }) : "";
+  const api = section(t("set_api"), `${field(t("set_api_base"), `<div class="flex items-center gap-2"><code class="mono text-[13px]">${esc(base)}</code>${copyBtn(base)}</div>`, t("set_api_hint"))}
+    <div><div class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">${t("set_endpoints")}</div><table class="grid-table text-[12px]"><tbody>${eps.map(([p, k]) => `<tr><td class="w-1/2"><a class="mono" href="${esc(p)}" ${IN_APP ? 'target="_blank" rel="noopener"' : ""}>${esc(p)}</a></td><td class="text-slate-500">${t(k)}</td><td class="r">${copyBtn(base + p)}</td></tr>`).join("")}</tbody></table></div>
+    ${field(t("set_prom"), `<div class="flex items-start gap-2"><pre class="mono flex-1 overflow-auto rounded bg-[#fbfbfc] p-2 text-[12px]">${esc(prom)}</pre>${copyBtn(prom)}</div>`)}
+    ${field(t("set_journal_days"), `<input id="set-journal-days" class="input mono w-32" type="number" min="0" max="365" value="${esc(f.journal_days)}"> <span class="text-[11px] text-slate-500">${t("set_applies_now")}</span>`, jstat)}`);
   let status = "";
   if (st.restarting) status = `<span class="text-slate-500">${t("set_restarting")}</span>`;
   else if (st.status && st.status.error) status = `<span class="text-red-600">${esc(st.status.error)}</span>`;
   else if (st.status && st.status.saved) status = `<span class="text-emerald-700">${t("set_saved")}.</span>${st.status.restart ? ` <span class="text-amber-700">${t("set_restart_needed")}</span> ${d.can_restart ? `<button class="btn btn-primary" id="set-restart">${t("set_restart_now")}</button>` : `<span class="text-slate-500">${t("set_restart_manual")}</span>`}` : ""}`;
   const bar = `<div class="flex flex-wrap items-center gap-3 border-t border-[#eef0f3] px-4 py-3"><button class="btn btn-primary" id="set-save" ${st.saving ? "disabled" : ""}>${t("set_save")}</button><div class="text-[12px]">${status}</div></div>`;
-  return panel(t("settings"), `<div class="grid gap-4 p-4 xl:grid-cols-2">${capture}${dashboard}${network}${appSection}${geo}${active}</div>${bar}`);
+  return panel(t("settings"), `<div class="grid gap-4 p-4 xl:grid-cols-2">${capture}${dashboard}${network}${appSection}${geo}${active}<div class="xl:col-span-2">${api}</div></div>${bar}`);
+}
+
+// ================= journal (on-disk history) =================
+
+function journalRange() {
+  const now = Math.floor(Date.now() / 1000);
+  const midnight = Math.floor(new Date(new Date().setHours(0, 0, 0, 0)).getTime() / 1000);
+  return { today: midnight, "3d": now - 3 * 86400, "7d": now - 7 * 86400, all: null }[ui.journal.range];
+}
+function journalQs(format) {
+  const j = ui.journal, qs = new URLSearchParams({ kind: j.kind, limit: "500" });
+  const from = journalRange();
+  if (from !== null) qs.set("from", String(from));
+  if (j.q.trim()) qs.set("q", j.q.trim());
+  if (format) qs.set("format", format);
+  return qs.toString();
+}
+async function refreshJournal() {
+  const j = ui.journal, seq = ++j.seq;
+  j.error = null;
+  try {
+    if (j.kind === "log") { const l = await getJson("/api/logs?lines=300"); if (seq === j.seq) j.log = l; }
+    else { const d = await getJson("/api/journal?" + journalQs()); if (seq === j.seq) j.data = d; }
+    if (!j.stats) j.stats = await getJson("/api/journal/stats");
+  } catch (e) { if (seq === j.seq) j.error = String(e.message || e); }
+  if (seq === j.seq && route.name === "journal") renderView();
+}
+
+function journalRows(kind, recs, nowSec) {
+  if (kind === "connections") return recs.map((c) => `<tr class="${c.id !== undefined ? "" : ""}">
+      <td class="num whitespace-nowrap text-[12px] text-slate-500">${clockUs(c.first_us)}</td>
+      <td class="max-w-[160px] truncate">${procLabel(c.process)}</td>
+      <td class="whitespace-nowrap">${chip(c.app)} <span class="text-[10px] uppercase text-slate-400">${esc(c.l4)}</span></td>
+      <td class="max-w-[240px]"><div class="truncate font-medium">${esc(c.name || c.remote_ip)}</div><div class="mono truncate text-[11px] text-slate-500">${esc(c.remote)}</div></td>
+      <td class="whitespace-nowrap">${geoLine(c.geo)}</td>
+      <td class="r num text-sky-700">${fmtBytes(c.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(c.bytes_out)}</td>
+      <td class="r num text-slate-500">${duration((c.last_us - c.first_us) / 1e6)}</td>
+      <td class="text-[12px] text-slate-500">${t("j_reason_" + c.reason) === "j_reason_" + c.reason ? esc(c.reason) : t("j_reason_" + c.reason)}</td></tr>`).join("");
+  if (kind === "dns") { const dash = '<span class="text-slate-300">—</span>'; return recs.map((e) => `<tr>
+      <td class="num whitespace-nowrap text-[12px] text-slate-500">${clockUs(e.ts_us)}</td>
+      <td class="max-w-[300px]"><div class="mono truncate font-medium" title="${esc(e.name)}">${esc(e.name)}</div></td>
+      <td class="text-[12px]">${esc(e.qtype)}</td><td class="text-[12px] ${e.rcode === "NOERROR" ? "text-emerald-700" : e.rcode ? "text-red-600" : "text-slate-400"}">${esc(e.rcode || "…")}</td>
+      <td class="mono max-w-[220px] truncate text-[12px]" title="${esc((e.answers || []).join(", "))}">${(e.answers || []).map(esc).join(", ") || dash}</td>
+      <td class="r">${e.latency_ms !== null && e.latency_ms !== undefined ? `<span class="num">${fmtMs(e.latency_ms)}</span>` : dash}</td>
+      <td class="text-[12px]">${e.requester ? esc(e.requester.name) : dash}</td>
+      <td class="mono text-[11px] text-slate-500">${esc(e.resolver || "")} · ${esc(e.transport || "")}</td></tr>`).join(""); }
+  return recs.map((a) => `<tr><td class="num whitespace-nowrap text-[12px] text-slate-500">${clock(a.ts)}</td><td><span class="chip ${SEV_CLASS[a.severity] || SEV_CLASS.low}">${t("sev_" + a.severity)}</span></td>
+      <td class="whitespace-nowrap font-medium">${t("kind_" + a.kind)}</td><td class="break-words">${alertText(a)}</td><td class="mono text-[11px] text-slate-500">${esc(a.host || "")}</td></tr>`).join("");
+}
+
+function viewJournal(s) {
+  const j = ui.journal, kinds = ["connections", "dns", "alerts", "log"];
+  const tabs = kinds.map((k) => `<button class="btn ${j.kind === k ? "btn-primary" : ""}" data-jkind="${k}">${t("j_" + k)}</button>`).join("");
+  const ranges = ["today", "3d", "7d", "all"].map((r) => `<button class="${j.range === r ? "on" : ""}" data-jrange="${r}">${t("j_" + r)}</button>`).join("");
+  const st = j.stats;
+  const kept = st ? (st.enabled && st.days_kept > 0 ? `<span class="text-slate-500">${t("j_kept", { d: st.days_kept })}</span>` : `<span class="text-amber-700">${t("j_disabled")}</span>`) : "";
+  let body;
+  if (j.error) body = `<div class="px-4 py-8 text-center text-red-600">${esc(j.error)}</div>`;
+  else if (j.kind === "log") {
+    const l = j.log;
+    body = !l ? `<div class="py-10 text-center text-slate-400">${t("loading")}</div>` : !l.file ? `<div class="py-10 text-center text-slate-400">${t("j_log_none")}</div>`
+      : `<div class="border-b border-[#eef0f3] px-4 py-1.5 text-[12px] text-slate-500">${t("j_log_file")}: <span class="mono">${esc(l.file)}</span></div><pre class="stream mono scroll max-h-[70vh] p-3 text-[12px] leading-5">${esc(l.lines.join("\n"))}</pre>`;
+  } else {
+    const d = j.data;
+    const head = { connections: ["time", "process", "protocol", "remote", "where", "↓", "↑", "j_duration", "j_reason"], dns: ["time", "name", "type", "result", "answers", "latency", "requester", "resolver"], alerts: ["time", "sev_high", "type", "info", "host"] }[j.kind];
+    const ths = head.map((k, i) => `<th class="${["↓", "↑", "latency"].includes(k) ? "r" : ""}">${k === "↓" || k === "↑" ? k : k === "sev_high" ? "" : t(k)}</th>`).join("");
+    body = `<div class="scroll max-h-[72vh]"><table class="grid-table"><thead><tr>${ths}</tr></thead><tbody>${d ? journalRows(j.kind, d.records, s ? s.now : Math.floor(Date.now() / 1000)) || empty(head.length, t("j_empty")) : empty(head.length, t("loading"))}</tbody></table></div>`;
+  }
+  const count = j.kind !== "log" && j.data ? `<span class="sub">· ${t("j_records", { n: fmtNum(j.data.records.length), t: fmtNum(j.data.total) })}</span>` : "";
+  const exports = j.kind !== "log" ? `<a class="btn" href="/api/journal?${journalQs("csv")}">${t("j_export_csv")}</a><a class="btn" href="/api/journal?${journalQs("jsonl")}">${t("j_export_jsonl")}</a>` : "";
+  const tools = `<div class="flex flex-wrap items-center gap-2 border-b border-[#eef0f3] px-3 py-2">${tabs}<span class="mx-1"></span>${j.kind !== "log" ? `<div class="seg">${ranges}</div><input id="journal-q" type="search" class="input min-w-[220px] flex-1" value="${esc(j.q)}" placeholder="${esc(t("j_search_ph"))}" autocomplete="off">` : ""}<button class="btn" id="journal-refresh">${t("j_refresh")}</button>${exports}<span class="ml-auto text-[12px]">${kept}</span></div>`;
+  return panel(`${t("journal")} <span class="sub">· ${t("j_hint")}</span> ${count}`, tools + body);
 }
 
 // ================= connection detail =================
@@ -1329,6 +1427,7 @@ function renderView(routeChanged) {
   else if (route.name === "dns") html = viewDns();
   else if (route.name === "sockets") html = viewSockets();
   else if (route.name === "settings") html = viewSettings();
+  else if (route.name === "journal") html = viewJournal(last);
   else if (!last) html = panel("netscope", `<div class="py-10 text-center text-slate-400">${t("waiting")}</div>`);
   else html = ({ processes: viewProcesses, connections: viewConnections, hosts: viewHosts, map: viewMap, route: viewRoute, dns: viewDns, sockets: viewSockets, alerts: viewAlerts }[route.name] || viewOverview)(last);
   v.innerHTML = html;
@@ -1351,6 +1450,7 @@ function schedulePolling() {
   else if (route.name === "connections" && (route.params.pid !== undefined || ui.connQuery.trim())) { connCache = null; every(refreshConnections, 2000); }
   else if (route.name === "route" || route.name === "hosts") { every(refreshWatch, 5000); if (route.name === "route" && ui.routeIp && !ui.traces[ui.routeIp]) runTrace(ui.routeIp); }
   else if (route.name === "settings") { ui.settings.status = null; loadSettings(); }
+  else if (route.name === "journal") { if (route.params.kind) ui.journal.kind = route.params.kind; refreshJournal(); }
 }
 
 function setConnQuery(q) {
@@ -1389,6 +1489,10 @@ $("view").addEventListener("click", (ev) => {
   if ((x = hit("[data-pkt]"))) { selectPacket(Number(x.dataset.pkt)); return; }
   if (el.id === "hex-all") { ui.hexAll = true; renderView(); }
   if (el.id === "set-save") { saveSettings(); return; }
+  if ((x = hit("[data-copy]"))) { navigator.clipboard && navigator.clipboard.writeText(x.dataset.copy).then(() => { x.textContent = t("set_copied"); setTimeout(() => { x.textContent = t("set_copy"); }, 1500); }).catch(() => {}); return; }
+  if ((x = hit("[data-jkind]"))) { ui.journal.kind = x.dataset.jkind; ui.journal.data = null; renderView(); refreshJournal(); return; }
+  if ((x = hit("[data-jrange]"))) { ui.journal.range = x.dataset.jrange; renderView(); refreshJournal(); return; }
+  if (el.id === "journal-refresh") { ui.journal.stats = null; refreshJournal(); return; }
   if (el.id === "set-restart") { restartNow(); }
 });
 
@@ -1451,6 +1555,7 @@ $("view").addEventListener("input", (ev) => {
   else if (id === "host-q") { ui.hostQuery = val; renderView(); }
   else if (id === "dns-q") { ui.dnsQuery = val; clearTimeout(ev.target._t); ev.target._t = setTimeout(refreshDns, 300); }
   else if (id === "route-ip") ui.routeIp = val.trim();
+  else if (id === "journal-q") { ui.journal.q = val; clearTimeout(ev.target._t); ev.target._t = setTimeout(refreshJournal, 300); }
   else if (id.startsWith("set-") && ui.settings.form) { const key = id.slice(4).replace(/-/g, "_"); if (ev.target.type !== "checkbox") ui.settings.form[key] = val; }
 });
 
@@ -1460,7 +1565,7 @@ function onSnapshot(s) {
   renderHeader(s);
   notifyNew(s);
   // These views refresh on their own timers; typing must not be interrupted.
-  const self = ["conn", "sockets", "dns", "settings"].includes(route.name) || (route.name === "connections" && (route.params.pid !== undefined || ui.connQuery.trim()));
+  const self = ["conn", "sockets", "dns", "settings", "journal"].includes(route.name) || (route.name === "connections" && (route.params.pid !== undefined || ui.connQuery.trim()));
   const typing = (document.activeElement && ["route-ip", "watch-ip"].includes(document.activeElement.id)) || ui.mapDrag;
   // The very first snapshot must always render: self-refreshing views may have drawn a placeholder.
   if (first || (!self && !typing)) renderView(); else renderNav();

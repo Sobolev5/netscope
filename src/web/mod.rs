@@ -26,8 +26,10 @@ use tokio::time::MissedTickBehavior;
 
 mod css;
 mod export;
+mod metrics;
 
 use crate::analytics::filter::{Filter, FilterError};
+use crate::analytics::journal::{self, Kind};
 use crate::analytics::views::CONN_FIELDS;
 use crate::analytics::SharedState;
 use crate::capture::engine::unix_now;
@@ -58,6 +60,16 @@ struct AppState {
     /// The address the dashboard listens on.
     bound: SocketAddr,
     settings_path: PathBuf,
+    /// Where the journal files are (or would be) read from.
+    journal_dir: PathBuf,
+}
+
+impl AppState {
+    /// Days of journal kept: the live value, or the settings file's when no journal is attached.
+    fn journal_days(&self) -> u32 {
+        let live = self.shared.read().journal().map(|j| j.retention_days());
+        live.unwrap_or_else(|| Settings::load(&self.settings_path).journal_days)
+    }
 }
 
 /// Default dashboard port; without `--port`, the next free one is used when it is busy.
@@ -156,6 +168,7 @@ pub async fn run_with_host(
     });
 
     let loopback_only = bound.ip().is_loopback();
+    let journal_dir = shared.read().journal().map_or_else(|| crate::app::data_dir().join("journal"), |j| j.dir().to_path_buf());
     let state = AppState {
         shared,
         feed: feed_rx,
@@ -165,6 +178,7 @@ pub async fn run_with_host(
         host,
         bound,
         settings_path,
+        journal_dir,
     };
     let app = router(state, loopback_only);
     let graceful = async move {
@@ -182,6 +196,10 @@ fn router(state: AppState, loopback_only: bool) -> Router {
         .route("/api/settings", get(settings_get).post(settings_post))
         .route("/api/interfaces", get(interfaces))
         .route("/api/restart", post(restart))
+        .route("/api/journal", get(journal_query))
+        .route("/api/journal/stats", get(journal_stats))
+        .route("/api/logs", get(logs))
+        .route("/metrics", get(metrics_text))
         .route("/", get(index))
         .route("/static/land-110m.json", get(land))
         .route("/static/app.css", get(app_css))
@@ -634,6 +652,133 @@ async fn client(mut socket: WebSocket, mut feed: watch::Receiver<Feed>, mut stop
     }
 }
 
+// ----- journal, metrics, logs -----
+
+#[derive(Debug, Deserialize)]
+struct JournalQuery {
+    kind: Option<String>,
+    /// Unix seconds, inclusive.
+    from: Option<i64>,
+    to: Option<i64>,
+    /// Case-insensitive substring of the record's JSON.
+    q: Option<String>,
+    limit: Option<usize>,
+    /// `json` (default), `jsonl` or `csv`.
+    format: Option<String>,
+}
+
+/// Journal records of one kind, newest first; `jsonl` and `csv` are downloads.
+async fn journal_query(State(s): State<AppState>, Query(q): Query<JournalQuery>) -> Response {
+    let Some(kind) = q.kind.as_deref().and_then(Kind::parse) else {
+        return api_error(StatusCode::BAD_REQUEST, "bad_request", "kind must be connections, dns or alerts");
+    };
+    let format = q.format.as_deref().unwrap_or("json");
+    if !matches!(format, "json" | "jsonl" | "csv") {
+        return api_error(StatusCode::BAD_REQUEST, "bad_request", "format must be json, jsonl or csv");
+    }
+    let limit = q.limit.unwrap_or(journal::DEFAULT_LIMIT).min(journal::MAX_LIMIT);
+    let now = unix_now();
+    let to = q.to.unwrap_or(now);
+    // Default range: the days kept, i.e. today and `journal_days` days before it.
+    let from = q.from.unwrap_or_else(|| journal::day_start(now) - i64::from(s.journal_days()) * 86_400);
+    if from > to {
+        return api_error(StatusCode::BAD_REQUEST, "bad_request", "from must not be after to");
+    }
+    let dir = s.journal_dir.clone();
+    let text = q.q.clone();
+    let result = tokio::task::spawn_blocking(move || journal::query(&dir, kind, Some(from), Some(to), text.as_deref(), limit)).await;
+    let r = match result {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal", format!("cannot read the journal: {e}")),
+        Err(e) => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()),
+    };
+    match format {
+        "jsonl" => download(export::journal_jsonl(&r.records).into_bytes(), "application/x-ndjson", format!("netscope-{}-{}.jsonl", kind.as_str(), stamp())),
+        "csv" => download(export::journal_csv(kind, &r.records).into_bytes(), "text/csv; charset=utf-8", format!("netscope-{}-{}.csv", kind.as_str(), stamp())),
+        _ => to_json(&serde_json::json!({ "kind": kind, "from": from, "to": to, "total": r.total, "records": r.records })),
+    }
+}
+
+/// Day files on disk plus the live journal's retention, queue and drop counters.
+async fn journal_stats(State(s): State<AppState>) -> Response {
+    let dir = s.journal_dir.clone();
+    let stats = match tokio::task::spawn_blocking(move || journal::stats(&dir)).await {
+        Ok(st) => st,
+        Err(e) => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()),
+    };
+    let (days_kept, enabled, pending, dropped) = {
+        let st = s.shared.read();
+        match st.journal() {
+            Some(j) => (j.retention_days(), j.enabled(), j.pending(), j.dropped()),
+            None => (Settings::load(&s.settings_path).journal_days, false, 0, 0),
+        }
+    };
+    let mut v = match serde_json::to_value(&stats) {
+        Ok(v) => v,
+        Err(e) => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()),
+    };
+    if let Some(o) = v.as_object_mut() {
+        o.insert("days_kept".into(), days_kept.into());
+        o.insert("enabled".into(), enabled.into());
+        o.insert("pending".into(), pending.into());
+        o.insert("dropped".into(), dropped.into());
+    }
+    to_json(&v)
+}
+
+/// Prometheus text exposition of the counters (one read lock, no snapshot).
+async fn metrics_text(State(s): State<AppState>) -> Response {
+    let body = metrics::render(&s.shared.read());
+    ([(header::CONTENT_TYPE, metrics::CONTENT_TYPE), (header::CACHE_CONTROL, "no-store")], body).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct LogsQuery {
+    lines: Option<usize>,
+}
+
+const DEFAULT_LOG_LINES: usize = 200;
+const MAX_LOG_LINES: usize = 5000;
+/// Only this much of the end of the log file is read.
+const LOG_TAIL_BYTES: u64 = 4 << 20;
+
+/// The last `n` lines of the file; `Ok(empty)` when it does not exist.
+fn tail_lines(path: &std::path::Path, n: usize) -> std::io::Result<Vec<String>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let len = f.metadata()?.len();
+    let start = len.saturating_sub(LOG_TAIL_BYTES);
+    f.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if start > 0 {
+        // The first line is most likely cut in the middle.
+        lines.remove(0);
+    }
+    let skip = lines.len().saturating_sub(n);
+    Ok(lines[skip..].iter().map(|l| l.to_string()).collect())
+}
+
+/// The end of the program's own log file (`{"file":null,"lines":[]}` when it has none).
+async fn logs(State(s): State<AppState>, Query(q): Query<LogsQuery>) -> Response {
+    let n = q.lines.unwrap_or(DEFAULT_LOG_LINES).min(MAX_LOG_LINES);
+    let Some(path) = s.host.as_deref().and_then(SettingsHost::log_path) else {
+        return to_json(&serde_json::json!({ "file": null, "lines": [] }));
+    };
+    let shown = path.display().to_string();
+    match tokio::task::spawn_blocking(move || tail_lines(&path, n)).await {
+        Ok(Ok(lines)) => to_json(&serde_json::json!({ "file": shown, "lines": lines })),
+        Ok(Err(e)) => api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal", format!("cannot read {shown}: {e}")),
+        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal", e.to_string()),
+    }
+}
+
 // ----- settings page -----
 
 fn settings_values(s: &Settings) -> serde_json::Value {
@@ -648,13 +793,14 @@ fn settings_values(s: &Settings) -> serde_json::Value {
         "verbose": s.verbose,
         "show_window": s.show_window,
         "notifications": s.notifications,
+        "journal_days": s.journal_days,
     })
 }
 
 /// The settings file, what the running program actually uses, and what the host can do.
 async fn settings_get(State(s): State<AppState>) -> Response {
     let values = Settings::load(&s.settings_path);
-    let (active, geo) = {
+    let (active, geo, journal) = {
         let st = s.shared.read();
         let c = &st.capture;
         let active = serde_json::json!({
@@ -664,7 +810,9 @@ async fn settings_get(State(s): State<AppState>) -> Response {
             "port": s.bound.port(),
             "mode": c.mode,
         });
-        (active, st.geo.as_ref().map(|g| (g.enabled(), g.status())))
+        let (days, enabled) = st.journal().map_or((values.journal_days, false), |j| (j.retention_days(), j.enabled()));
+        let journal = serde_json::json!({ "dir": s.journal_dir.display().to_string(), "days": days, "enabled": enabled });
+        (active, st.geo.as_ref().map(|g| (g.enabled(), g.status())), journal)
     };
     let geo = match geo {
         Some((enabled, st)) => serde_json::json!({ "enabled": enabled, "dir": st.dir, "note": st.note }),
@@ -679,6 +827,8 @@ async fn settings_get(State(s): State<AppState>) -> Response {
         "can_restart": host.is_some_and(SettingsHost::can_restart),
         "from_cli": host.is_none_or(SettingsHost::started_from_cli),
         "geoip": geo,
+        "journal": journal,
+        "api": { "base": crate::app::dashboard_url(s.bound), "metrics": "/metrics" },
         "version": env!("CARGO_PKG_VERSION"),
     }))
 }
@@ -730,6 +880,10 @@ async fn settings_post(State(s): State<AppState>, body: Bytes) -> Response {
     }
     if let Err(e) = next.save(&s.settings_path) {
         return api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal", e);
+    }
+    // The journal retention is read on the fly: apply it to the running journal at once.
+    if let Some(j) = s.shared.read().journal() {
+        j.set_retention_days(next.journal_days);
     }
     if let (Some(on), Some(h)) = (post.autostart, host) {
         if let Err(e) = h.set_autostart(on) {

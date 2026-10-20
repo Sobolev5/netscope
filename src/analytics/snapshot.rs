@@ -119,21 +119,13 @@ impl State {
         dns.sort_unstable_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
         let dns_top = dns.into_iter().take(DNS_TOP).map(|(n, &c)| DnsView { name: n.clone(), count: c }).collect();
 
-        // The newest sample is still filling up; report the one before it.
-        let complete = if self.series.len() >= 2 { self.series.get(self.series.len() - 2) } else { self.series.back() };
-        let rates = complete.map_or(Rates::default(), |s| Rates {
-            bytes_in: s.bytes_in,
-            bytes_out: s.bytes_out,
-            packets: s.packets,
-        });
-
         let (connection_count, connections) = self.connections(None, None, CONNECTIONS);
         Snapshot {
             now: self.now,
-            uptime_secs: self.first_ts.map_or(0, |t| self.now - t),
+            uptime_secs: self.uptime_secs(),
             capture: self.capture.clone(),
             totals: self.totals,
-            rates,
+            rates: self.rates(),
             protocols: Proto::ALL
                 .into_iter()
                 .map(|p| ProtoView { name: p.name(), packets: self.protocols[p.index()].packets, bytes: self.protocols[p.index()].bytes })

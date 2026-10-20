@@ -140,6 +140,11 @@ impl AlertLog {
         self.items.iter().rev().take(limit).cloned().collect()
     }
 
+    /// The most recently recorded alert.
+    pub fn last(&self) -> Option<&Alert> {
+        self.items.back()
+    }
+
     pub fn counts(&self) -> AlertCounts {
         self.counts
     }

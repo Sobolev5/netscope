@@ -1,12 +1,20 @@
 ; NetScope Windows installer (Inno Setup 6.1+). Built by scripts\build-installer.ps1,
 ; which passes the version and the directory with the release binaries:
 ;   ISCC.exe /DAppVersion=0.2.0 /DBinDir=..\target\release installer\netscope.iss
+; The "full" build (scripts\build-installer.ps1 -Full) adds, for machines without internet:
+;   /DWebView2Local=<Evergreen standalone installer .exe>  — the WebView2 runtime, embedded
+;   /DGeoIPDir=<dir with dbip-*.mmdb>                        — geolocation databases, embedded
+;   /DSuffix=-full                                           — output file name suffix
+; Npcap cannot be embedded (its license forbids redistribution): it is downloaded at install time.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 #ifndef BinDir
   #define BinDir "..\target\release"
+#endif
+#ifndef Suffix
+  #define Suffix ""
 #endif
 #define AppName "NetScope"
 #define AppPublisher "netscope project"
@@ -33,7 +41,7 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 MinVersion=10.0
 OutputDir=..\dist
-OutputBaseFilename=NetScope-Setup-{#AppVersion}
+OutputBaseFilename=NetScope-Setup-{#AppVersion}{#Suffix}
 SetupIconFile=..\assets\netscope.ico
 UninstallDisplayIcon={app}\netscope-app.exe
 UninstallDisplayName={#AppName}
@@ -87,7 +95,9 @@ ru.WebView2Failed=Не удалось установить среду WebView2. 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:TaskDesktop}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "autostart"; Description: "{cm:TaskAutostart}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+#ifndef GeoIPDir
 Name: "geoip"; Description: "{cm:TaskGeoip}"; GroupDescription: "{#AppName}:"
+#endif
 Name: "egress"; Description: "{cm:TaskEgress}"; GroupDescription: "{#AppName}:"
 
 [Files]
@@ -98,6 +108,17 @@ Source: "..\assets\webview2\LICENSE.txt"; DestDir: "{app}"; DestName: "LICENSE-W
 Source: "..\scripts\fetch-geoip.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+#ifdef WebView2Local
+; Extracted and run from [Code] only when the runtime is missing.
+Source: "{#WebView2Local}"; DestDir: "{tmp}"; DestName: "WebView2Runtime.exe"; Flags: dontcopy
+#endif
+#ifdef GeoIPDir
+; DB-IP Lite, CC BY 4.0 (https://db-ip.com): attribution is shown on the dashboard.
+Source: "{#GeoIPDir}\dbip-city-lite.mmdb"; DestDir: "{localappdata}\NetScope\geoip"; Check: not IsAdminInstallMode; Flags: ignoreversion
+Source: "{#GeoIPDir}\dbip-asn-lite.mmdb"; DestDir: "{localappdata}\NetScope\geoip"; Check: not IsAdminInstallMode; Flags: ignoreversion
+Source: "{#GeoIPDir}\dbip-city-lite.mmdb"; DestDir: "{commonappdata}\NetScope\geoip"; Check: IsAdminInstallMode; Flags: ignoreversion
+Source: "{#GeoIPDir}\dbip-asn-lite.mmdb"; DestDir: "{commonappdata}\NetScope\geoip"; Check: IsAdminInstallMode; Flags: ignoreversion
+#endif
 
 [Dirs]
 Name: "{localappdata}\NetScope"; Check: not IsAdminInstallMode
@@ -117,9 +138,11 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 ; Geolocation data goes to the per-user data folder, where the program looks for it.
+#ifndef GeoIPDir
 ; Geolocation data: the installing user's folder, or ProgramData (read by every user) for an all-users install.
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\fetch-geoip.ps1"" -Dir ""{localappdata}\NetScope\geoip"""; StatusMsg: "{cm:GeoipDownloading}"; Tasks: geoip; Check: not IsAdminInstallMode; Flags: runhidden waituntilterminated skipifsilent
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\fetch-geoip.ps1"" -Dir ""{commonappdata}\NetScope\geoip"""; StatusMsg: "{cm:GeoipDownloading}"; Tasks: geoip; Check: IsAdminInstallMode; Flags: runhidden waituntilterminated skipifsilent
+#endif
 Filename: "{app}\netscope-app.exe"; Description: "{cm:RunApp}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -155,7 +178,17 @@ procedure InstallWebView2;
 var
   Code: Integer;
 begin
-  if WebView2Installed or WizardSilent then
+  if WebView2Installed then
+    exit;
+#ifdef WebView2Local
+  // The runtime ships inside this installer: no internet needed, works unattended too.
+  ExtractTemporaryFile('WebView2Runtime.exe');
+  if not Exec(ExpandConstant('{tmp}\WebView2Runtime.exe'), '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, Code) or not WebView2Installed then
+    if not WizardSilent then
+      MsgBox(CustomMessage('WebView2Failed'), mbInformation, MB_OK);
+  exit;
+#endif
+  if WizardSilent then
     exit;
   DownloadPage.Clear;
   DownloadPage.Add('{#WebView2Url}', 'MicrosoftEdgeWebview2Setup.exe', '');

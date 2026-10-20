@@ -91,17 +91,21 @@ impl DnsLog {
         Self { entries: VecDeque::with_capacity(cap.min(4096)), cap, next: 1, queries: 0, failures: 0 }
     }
 
-    fn push(&mut self, e: DnsEntry) {
-        if self.entries.len() == self.cap {
-            self.entries.pop_front();
-        }
+    /// Appends an entry; returns the entry evicted to make room if it was still unanswered
+    /// (an answered one was reported when its response came).
+    fn push(&mut self, e: DnsEntry) -> Option<DnsEntry> {
+        let evicted = if self.entries.len() == self.cap { self.entries.pop_front().filter(|old| old.rcode.is_none()) } else { None };
         self.entries.push_back(e);
         self.next += 1;
+        evicted
     }
 
-    /// Records a query or the matching response.
-    pub fn record(&mut self, ts_us: i64, m: &DnsMessage, resolver: IpAddr, requester: Option<Requester>, transport: &'static str) {
+    /// Records a query or the matching response. Returns the entries that are final from
+    /// now on — answered or failed by this message, orphan responses, and unanswered
+    /// queries pushed out of the ring — for the journal.
+    pub fn record(&mut self, ts_us: i64, m: &DnsMessage, resolver: IpAddr, requester: Option<Requester>, transport: &'static str) -> Vec<DnsEntry> {
         let answers: Vec<String> = m.answers.iter().map(|a| a.addr.to_string()).collect();
+        let mut done = Vec::new();
         for q in &m.questions {
             if !m.response {
                 self.queries += 1;
@@ -118,7 +122,7 @@ impl DnsLog {
                     transport,
                     txid: m.id,
                 };
-                self.push(e);
+                done.extend(self.push(e));
                 continue;
             }
             let rcode = rcode_name(m.rcode);
@@ -137,6 +141,7 @@ impl DnsLog {
                     e.rcode = Some(rcode);
                     e.answers = answers.clone();
                     e.latency_ms = Some((ts_us - e.ts_us).max(0) as f64 / 1000.0);
+                    done.push(e.clone());
                 }
                 // The query was not captured (e.g. capture started in between).
                 None => {
@@ -153,10 +158,12 @@ impl DnsLog {
                         transport,
                         txid: m.id,
                     };
-                    self.push(e);
+                    done.push(e.clone());
+                    done.extend(self.push(e));
                 }
             }
         }
+        done
     }
 
     /// Newest first.
@@ -209,6 +216,24 @@ mod tests {
         log.record(7, &parse(&build_response(1, "a.test", &[ip("1.2.3.4")], 1)).unwrap(), ip("8.8.8.8"), None, "udp");
         assert_eq!(log.len(), 2, "bounded");
         assert!(log.iter().any(|e| e.resolver == "1.1.1.1" && e.rcode.is_none()));
+    }
+
+    #[test]
+    fn record_reports_final_entries_for_the_journal() {
+        let mut log = DnsLog::new(2);
+        let r = ip("1.1.1.1");
+        assert!(log.record(1, &parse(&build_query(1, "a.test", TYPE_A)).unwrap(), r, None, "udp").is_empty(), "a query is not final");
+        let done = log.record(2, &parse(&build_response(1, "a.test", &[ip("1.2.3.4")], 1)).unwrap(), r, None, "udp");
+        assert_eq!(done.len(), 1);
+        assert_eq!((done[0].name.as_str(), done[0].rcode, done[0].latency_ms), ("a.test", Some("NOERROR"), Some(0.001)));
+        let done = log.record(3, &parse(&build_response(9, "orphan.test", &[], 1)).unwrap(), r, None, "udp");
+        assert_eq!((done.len(), done[0].name.as_str()), (1, "orphan.test"), "an orphan response is final at once");
+        // Ring full (cap 2): a new query evicts a.test (answered: already reported), then b.test (pending: reported now).
+        assert!(log.record(4, &parse(&build_query(2, "b.test", TYPE_A)).unwrap(), r, None, "udp").is_empty());
+        let done = log.record(5, &parse(&build_query(3, "c.test", TYPE_A)).unwrap(), r, None, "udp");
+        assert!(done.is_empty(), "orphan.test was evicted but it was final already: {done:?}");
+        let done = log.record(6, &parse(&build_query(4, "d.test", TYPE_A)).unwrap(), r, None, "udp");
+        assert_eq!((done.len(), done[0].name.as_str(), done[0].rcode), (1, "b.test", None), "evicted while unanswered");
     }
 
     #[test]

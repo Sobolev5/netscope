@@ -1,6 +1,7 @@
 //! CSV and pcap exports of what the dashboard shows.
 
 use crate::analytics::filter::Filter;
+use crate::analytics::journal::Kind;
 use crate::analytics::{SharedState, State};
 use crate::capture::file::PcapWriter;
 
@@ -174,6 +175,59 @@ pub fn dns_csv(st: &State, q: Option<&str>) -> String {
     )
 }
 
+/// Columns of a journal CSV: dotted paths into the record (`time_utc` is derived from `ts`).
+pub fn journal_columns(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::Connections => &[
+            "ts", "time_utc", "first_us", "last_us", "id", "process.pid", "process.name", "process.path", "l4", "app", "local", "remote",
+            "remote_ip", "name", "geo.country_code", "geo.country", "geo.city", "geo.org", "geo.asn", "bytes_in", "bytes_out", "packets_in",
+            "packets_out", "state", "initiated", "tls.sni", "tls.version", "tls.alpn", "tls.ja4", "rtt_ms", "retrans", "hops", "reason",
+        ],
+        Kind::Dns => &["ts", "time_utc", "seq", "ts_us", "name", "qtype", "resolver", "requester.pid", "requester.name", "answers", "rcode", "latency_ms", "transport", "used_by"],
+        Kind::Alerts => &["ts", "time_utc", "id", "severity", "kind", "host", "name", "message", "details"],
+    }
+}
+
+/// The cell for `path` in a journal record: nested objects by dotted path, lists joined
+/// with spaces, objects as JSON, `null` as empty.
+fn cell(record: &serde_json::Value, path: &str) -> String {
+    if path == "time_utc" {
+        return record.get("ts").and_then(serde_json::Value::as_i64).map(|ts| utc(ts * 1_000_000)).unwrap_or_default();
+    }
+    let mut v = record;
+    for key in path.split('.') {
+        match v.get(key) {
+            Some(x) => v = x,
+            None => return String::new(),
+        }
+    }
+    match v {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(a) => a.iter().map(|x| match x {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        }).collect::<Vec<_>>().join(" "),
+        other => other.to_string(),
+    }
+}
+
+/// Journal records as CSV with a fixed column set per kind.
+pub fn journal_csv(kind: Kind, records: &[serde_json::Value]) -> String {
+    let columns = journal_columns(kind);
+    csv(columns, records.iter().map(|r| columns.iter().map(|c| cell(r, c)).collect()))
+}
+
+/// Journal records as JSON lines.
+pub fn journal_jsonl(records: &[serde_json::Value]) -> String {
+    let mut out = String::new();
+    for r in records {
+        out.push_str(&r.to_string());
+        out.push('\n');
+    }
+    out
+}
+
 /// Packets copied out of the state, so the file is written without holding its lock.
 pub struct PcapFrames {
     linktype: i32,
@@ -221,6 +275,31 @@ mod tests {
         assert_eq!(csv_field("-1"), "'-1");
         let out = csv(&["a", "b"], vec![vec!["1".into(), "x,y".into()]].into_iter());
         assert_eq!(out, "\u{feff}a,b\r\n1,\"x,y\"\r\n");
+    }
+
+    #[test]
+    fn journal_csv_flattens_nested_objects_and_escapes_formulas() {
+        let rec = serde_json::json!({
+            "ts": 1_709_164_800, "first_us": 1, "last_us": 2, "id": 7,
+            "process": { "pid": 5, "name": "=cmd.exe", "path": null },
+            "l4": "tcp", "app": "tls", "local": "10.0.0.2:1", "remote": "1.1.1.1:443", "remote_ip": "1.1.1.1", "name": "a,b",
+            "geo": null, "bytes_in": 10, "bytes_out": 20, "packets_in": 1, "packets_out": 2, "state": "closed", "initiated": "local",
+            "tls": { "sni": "x", "version": "TLS 1.3", "alpn": ["h2", "http/1.1"], "ja4": "j" }, "rtt_ms": 1.5, "retrans": 0, "hops": null, "reason": "closed"
+        });
+        let text = journal_csv(Kind::Connections, std::slice::from_ref(&rec));
+        let lines: Vec<&str> = text.trim_start_matches('\u{feff}').lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with("ts,time_utc,first_us,last_us,id,process.pid,process.name,process.path,l4,"));
+        assert_eq!(lines[0].split(',').count(), journal_columns(Kind::Connections).len());
+        let cells: Vec<&str> = lines[1].split(',').collect();
+        assert_eq!(&cells[..9], &["1709164800", "2024-02-29 00:00:00", "1", "2", "7", "5", "'=cmd.exe", "", "tcp"]);
+        assert!(lines[1].contains(",\"a,b\",,"), "geo is null → empty cells: {}", lines[1]);
+        assert!(lines[1].contains(",x,TLS 1.3,h2 http/1.1,j,1.5,0,,closed"), "{}", lines[1]);
+        let alert = serde_json::json!({ "ts": 5, "id": 1, "severity": "high", "kind": "k", "host": null, "name": null, "message": "m", "details": { "a": "1" } });
+        let text = journal_csv(Kind::Alerts, &[alert]);
+        assert!(text.ends_with("5,1970-01-01 00:00:05,1,high,k,,,m,\"{\"\"a\"\":\"\"1\"\"}\"\r\n"), "{text:?}");
+        assert_eq!(journal_jsonl(&[rec.clone(), rec]).lines().count(), 2);
+        assert!(journal_csv(Kind::Dns, &[]).contains("requester.name,answers,"));
     }
 
     #[test]

@@ -42,7 +42,11 @@ pub fn file_info(path: &Path) -> CaptureInfo {
 
 /// Replays a pcap through the real engine and waits for it to finish.
 pub fn replay(path: &Path) -> SharedState {
-    let shared = SharedState::new(State::new(Config::default(), HashSet::new(), file_info(path)));
+    replay_into(path, SharedState::new(State::new(Config::default(), HashSet::new(), file_info(path))))
+}
+
+/// Replays a pcap into a prepared state (e.g. one with a journal attached).
+pub fn replay_into(path: &Path, shared: SharedState) -> SharedState {
     let source = PcapFile::open(path).unwrap();
     let handle = engine::spawn(Box::new(source), shared.clone(), Arc::new(AtomicBool::new(false)), Pacing::Fast).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);

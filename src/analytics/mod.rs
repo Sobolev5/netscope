@@ -5,6 +5,7 @@ pub mod anomaly;
 pub mod dnslog;
 pub mod filter;
 pub mod flows;
+pub mod journal;
 pub mod novelty;
 pub mod persist;
 mod snapshot;
@@ -15,6 +16,7 @@ pub mod views;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub use anomaly::{Alert, AlertCounts, AlertKind, Severity};
+pub use journal::Journal;
 pub use persist::{NoveltyBaseline, Persisted, WatchEntry};
 pub use snapshot::{DnsView, HostView, ProtoView, Rates, Snapshot};
 pub use state::{CaptureInfo, CaptureStatus, Config, Counter, Host, NameSource, Named, Sample, State, Totals};

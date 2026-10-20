@@ -15,7 +15,9 @@ use serde::Deserialize;
 pub const FILE_NAME: &str = "netscope.ini";
 const BOM: char = '\u{feff}';
 /// Known keys, in the order new lines are appended to a file that lacks them.
-pub const KEYS: [&str; 10] = ["port", "host", "interface", "filter", "geoip", "egress_check", "promiscuous", "verbose", "show_window", "notifications"];
+pub const KEYS: [&str; 11] = ["port", "host", "interface", "filter", "geoip", "egress_check", "promiscuous", "verbose", "show_window", "notifications", "journal_days"];
+/// Longest journal retention the settings accept (days).
+pub const MAX_JOURNAL_DAYS: u32 = 365;
 pub const NOTIFICATION_LEVELS: [&str; 3] = ["medium", "high", "off"];
 
 /// Where the settings live: `<data dir>/netscope.ini`.
@@ -48,6 +50,11 @@ pub trait SettingsHost: Send + Sync {
     fn settings_path(&self) -> PathBuf {
         settings_path()
     }
+    /// The program's own log file, if it writes one (the desktop app does; the CLI logs
+    /// to the console).
+    fn log_path(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +75,8 @@ pub struct Settings {
     pub show_window: bool,
     /// Desktop app notifications: `medium`, `high` or `off`.
     pub notifications: String,
+    /// Days of journal (finished connections, DNS, alerts) kept on disk; 0 = no journal.
+    pub journal_days: u32,
 }
 
 impl Default for Settings {
@@ -83,6 +92,7 @@ impl Default for Settings {
             verbose: false,
             show_window: true,
             notifications: "medium".into(),
+            journal_days: 1,
         }
     }
 }
@@ -102,6 +112,7 @@ pub struct SettingsPatch {
     pub verbose: Option<bool>,
     pub show_window: Option<bool>,
     pub notifications: Option<String>,
+    pub journal_days: Option<u32>,
 }
 
 fn is_off(v: &str) -> bool {
@@ -227,6 +238,10 @@ impl Settings {
                 // `open_browser` is the pre-0.2 name of `show_window`.
                 "open_browser" if show_window.is_none() => s.show_window = !is_off(v),
                 "notifications" => s.notifications = normalize_level(v),
+                "journal_days" if !v.is_empty() => match v.parse::<u32>() {
+                    Ok(d) if d <= MAX_JOURNAL_DAYS => s.journal_days = d,
+                    _ => tracing::warn!("{FILE_NAME}: ignoring journal_days={v}: not a number between 0 and {MAX_JOURNAL_DAYS}"),
+                },
                 _ => {}
             }
         }
@@ -259,6 +274,7 @@ impl Settings {
             ("verbose", flag(self.verbose).into()),
             ("show_window", flag(self.show_window).into()),
             ("notifications", self.notifications.clone()),
+            ("journal_days", self.journal_days.to_string()),
         ]
     }
 
@@ -288,6 +304,9 @@ impl Settings {
         }
         if self.verbose {
             argv.push("-v".into());
+        }
+        if self.journal_days != Settings::default().journal_days {
+            argv.extend(["--journal-days".into(), self.journal_days.to_string()]);
         }
         argv
     }
@@ -339,13 +358,19 @@ impl Settings {
         if let Some(b) = patch.show_window {
             next.show_window = b;
         }
+        if let Some(d) = patch.journal_days {
+            if d > MAX_JOURNAL_DAYS {
+                return Err(format!("journal_days must be between 0 and {MAX_JOURNAL_DAYS}"));
+            }
+            next.journal_days = d;
+        }
         *self = next;
         Ok(())
     }
 
     /// Whether going from `previous` to these settings changes anything the running program
-    /// read at start (capture, dashboard address, geolocation, logging). `show_window` and
-    /// `notifications` are read on the fly.
+    /// read at start (capture, dashboard address, geolocation, logging). `show_window`,
+    /// `notifications` and `journal_days` are read on the fly.
     pub fn needs_restart(&self, previous: &Settings) -> bool {
         self.port != previous.port
             || self.host != previous.host
@@ -539,15 +564,27 @@ mod tests {
             verbose: true,
             show_window: false,
             notifications: "high".into(),
+            journal_days: 7,
         };
         let argv = s.to_args("netscope");
         assert_eq!(
             argv,
-            ["netscope", "--port", "9000", "--host", "0.0.0.0", "--interface", "Wi-Fi", "--filter", "tcp port 443", "--geoip", r"C:\geo data", "--no-egress-check", "--no-promisc", "-v"]
+            ["netscope", "--port", "9000", "--host", "0.0.0.0", "--interface", "Wi-Fi", "--filter", "tcp port 443", "--geoip", r"C:\geo data", "--no-egress-check", "--no-promisc", "-v", "--journal-days", "7"]
         );
         let a = Args::try_parse_from(&argv).unwrap();
         assert_eq!((a.port, a.host.as_str(), a.interface.as_deref(), a.filter.as_deref()), (Some(9000), "0.0.0.0", Some("Wi-Fi"), Some("tcp port 443")));
         assert_eq!((a.geoip.as_deref(), a.no_egress_check, a.no_promisc, a.verbose), (Some(Path::new(r"C:\geo data")), true, true, 1));
+        assert_eq!(a.journal_days, 7);
+        assert_eq!(Args::try_parse_from(Settings { journal_days: 0, ..Settings::default() }.to_args("x")).unwrap().journal_days, 0, "zero is passed (it disables the journal)");
+    }
+
+    #[test]
+    fn journal_days_from_the_file() {
+        with_ini("journal_days=30\n", |p| assert_eq!(Settings::load(p).journal_days, 30));
+        with_ini("journal_days=0\n", |p| assert_eq!(args(p).journal_days, 0));
+        for bad in ["journal_days=x\n", "journal_days=400\n", "journal_days=-1\n", "journal_days=\n"] {
+            with_ini(bad, |p| assert_eq!(Settings::load(p).journal_days, 1, "{bad:?} falls back to the default"));
+        }
     }
 
     #[test]
@@ -563,7 +600,7 @@ mod tests {
             let text = fs::read_to_string(p).unwrap();
             assert_eq!(
                 text,
-                "# NetScope settings\r\nport=9001\r\nnotifications=off\r\nshow_window=1\r\nunknown=keep me\r\nhost=127.0.0.1\r\ninterface=\r\nfilter=udp\r\ngeoip=D:\\geo\r\negress_check=1\r\npromiscuous=1\r\nverbose=0\r\n"
+                "# NetScope settings\r\nport=9001\r\nnotifications=off\r\nshow_window=1\r\nunknown=keep me\r\nhost=127.0.0.1\r\ninterface=\r\nfilter=udp\r\ngeoip=D:\\geo\r\negress_check=1\r\npromiscuous=1\r\nverbose=0\r\njournal_days=1\r\n"
             );
             for key in KEYS {
                 assert_eq!(text.lines().filter(|l| l.to_ascii_lowercase().starts_with(&format!("{key}="))).count(), 1, "{key} appears once");
@@ -608,9 +645,14 @@ mod tests {
         assert_eq!((s.host.as_str(), s.interface.as_deref()), ("localhost", None));
         s.apply(&SettingsPatch { host: Some("::1".into()), ..SettingsPatch::default() }).unwrap();
         assert_eq!(s.host, "::1");
+        s.apply(&SettingsPatch { journal_days: Some(0), ..SettingsPatch::default() }).unwrap();
+        assert_eq!(s.journal_days, 0);
+        s.apply(&SettingsPatch { journal_days: Some(365), ..SettingsPatch::default() }).unwrap();
+        assert_eq!(s.journal_days, 365);
         s.apply(&SettingsPatch::default()).unwrap();
         let before = s.clone();
         for (bad, field) in [
+            (SettingsPatch { journal_days: Some(366), ..SettingsPatch::default() }, "journal_days"),
             (SettingsPatch { port: Some(0), ..SettingsPatch::default() }, "port"),
             (SettingsPatch { host: Some("example.org".into()), ..SettingsPatch::default() }, "host"),
             (SettingsPatch { host: Some("127.0.0.1:80".into()), ..SettingsPatch::default() }, "host"),
@@ -636,8 +678,10 @@ mod tests {
 
         let base = Settings::default();
         let mut s = base.clone();
-        s.apply(&SettingsPatch { notifications: Some("off".into()), show_window: Some(false), ..SettingsPatch::default() }).unwrap();
-        assert!(!s.needs_restart(&base), "notifications and the window are read on the fly");
+        s.apply(&SettingsPatch { notifications: Some("off".into()), show_window: Some(false), journal_days: Some(5), ..SettingsPatch::default() }).unwrap();
+        assert!(!s.needs_restart(&base), "notifications, the window and the journal retention are read on the fly");
+        assert!(serde_json::from_str::<SettingsPatch>(r#"{"journal_days": -1}"#).is_err());
+        assert_eq!(serde_json::from_str::<SettingsPatch>(r#"{"journal_days": 3}"#).unwrap().journal_days, Some(3));
         for patch in [
             SettingsPatch { port: Some(1), ..SettingsPatch::default() },
             SettingsPatch { host: Some("0.0.0.0".into()), ..SettingsPatch::default() },
