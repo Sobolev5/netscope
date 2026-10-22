@@ -6,11 +6,11 @@ packets and streams like in Wireshark, TLS fingerprints, a DNS journal, geolocat
 security alerts, Prometheus metrics and a journal on disk — in one small desktop app, written in Rust.</p>
 
 <p align="center">
-<a href="https://github.com/Sobolev5/netscope/releases/latest"><img src="https://img.shields.io/github/v/release/Sobolev5/netscope?label=download&color=2563eb" alt="Latest release"></a>
+<a href="https://github.com/Sobolev5/netscope/releases"><img src="https://img.shields.io/github/v/release/Sobolev5/netscope?include_prereleases&label=download&color=2563eb" alt="Latest release"></a>
 <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4" alt="Windows 10/11 x64">
 <img src="https://img.shields.io/badge/rust-2021-f74c00?logo=rust" alt="Rust">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
-<img src="https://img.shields.io/badge/tests-283%20passing-brightgreen" alt="Tests">
+<img src="https://img.shields.io/badge/tests-310%20passing-brightgreen" alt="Tests">
 <img src="https://img.shields.io/badge/languages-EN%20%7C%20RU-8b5cf6" alt="English / Russian">
 </p>
 
@@ -18,7 +18,7 @@ security alerts, Prometheus metrics and a journal on disk — in one small deskt
 
 ## Download
 
-Grab the installer from the **[latest release](https://github.com/Sobolev5/netscope/releases/latest)**:
+Grab the installer from the **[latest release](https://github.com/Sobolev5/netscope/releases)**:
 
 | File | What it is |
 |---|---|
