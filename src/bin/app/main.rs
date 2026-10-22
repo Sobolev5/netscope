@@ -71,9 +71,9 @@ mod win {
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CheckMenuRadioItem, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
-        FindWindowW, GetClientRect, GetCursorPos, GetMessageW, GetSystemMetrics, IsIconic, LoadCursorW, LoadIconW,
-        MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetForegroundWindow, SetMenuDefaultItem, SetMenuItemInfoW,
-        SetWindowPos, ShowWindow, TrackPopupMenu, TranslateMessage, CW_USEDEFAULT, HMENU, IDC_ARROW, IDI_APPLICATION, IDYES, MB_ICONERROR,
+        FindWindowW, GetClientRect, GetCursorPos, GetMenuItemCount, GetMessageW, GetSystemMetrics, IsIconic, LoadCursorW, LoadIconW,
+        MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageTimeoutW, SetForegroundWindow, SetMenuDefaultItem, SetMenuItemInfoW,
+        SetWindowPos, ShowWindow, TrackPopupMenu, TranslateMessage, CW_USEDEFAULT, SMTO_ABORTIFHUNG, SMTO_BLOCK, HMENU, IDC_ARROW, IDI_APPLICATION, IDYES, MB_ICONERROR,
         MB_ICONINFORMATION, MB_OK, MB_YESNO, MENUITEMINFOW, MF_BYCOMMAND, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, MIIM_BITMAP, MINMAXINFO,
         MSG, SM_CXSCREEN, SM_CXSMICON, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, TPM_BOTTOMALIGN,
         TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_COPYDATA, WM_DESTROY, WM_DPICHANGED, WM_GETMINMAXINFO,
@@ -319,8 +319,11 @@ mod win {
         unsafe {
             use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
             use windows_sys::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
-            // 100 ns intervals since 1601-01-01.
-            let ft = (ts as u64 + 11_644_473_600) * 10_000_000;
+            // 100 ns intervals since 1601-01-01; out of range (the settings clamp it, but the
+            // file can be edited by hand) shows nothing rather than overflowing.
+            let Some(ft) = u64::try_from(ts).ok().and_then(|t| t.checked_add(11_644_473_600)).and_then(|t| t.checked_mul(10_000_000)) else {
+                return String::new();
+            };
             let ft = FILETIME { dwLowDateTime: ft as u32, dwHighDateTime: (ft >> 32) as u32 };
             let mut utc: SYSTEMTIME = std::mem::zeroed();
             let mut local: SYSTEMTIME = std::mem::zeroed();
@@ -554,19 +557,25 @@ mod win {
     }
 
     /// Shows the alerts the poller found: up to `BURST_LIMIT` toasts per batch and
-    /// `RATE_LIMIT` per minute, the rest as one "N more" toast (replaced in place).
+    /// `RATE_LIMIT` per minute, the rest as one "N more" toast. That toast is replaced in
+    /// place, so its count keeps adding up while the bursts go on (until a minute passes
+    /// without one), and it makes a sound when a high-severity alert is folded into it.
     fn notify_alerts(alerts: Vec<Alert>) {
         thread_local! {
             static SHOWN: RefCell<VecDeque<Instant>> = const { RefCell::new(VecDeque::new()) };
+            /// Alerts in the current "N more" toast and when it was last updated.
+            static SUMMARY: RefCell<(usize, Option<Instant>)> = const { RefCell::new((0, None)) };
         }
         let ru = shared().russian;
         let now = Instant::now();
         SHOWN.with(|s| s.borrow_mut().retain(|t| now.duration_since(*t) < Duration::from_secs(60)));
         let mut shown = 0usize;
         let mut extra = 0usize;
+        let mut extra_high = false;
         for a in &alerts {
             if shown >= BURST_LIMIT || SHOWN.with(|s| s.borrow().len()) >= RATE_LIMIT {
                 extra += 1;
+                extra_high |= a.severity == Severity::High;
                 continue;
             }
             show_alert(a, ru);
@@ -574,8 +583,15 @@ mod win {
             SHOWN.with(|s| s.borrow_mut().push_back(now));
         }
         if extra > 0 {
+            let total = SUMMARY.with(|s| {
+                let mut s = s.borrow_mut();
+                let (count, at) = *s;
+                let count = if at.is_some_and(|t| now.duration_since(t) < Duration::from_secs(60)) { count } else { 0 };
+                *s = (count + extra, Some(now));
+                count + extra
+            });
             let title = text("more_title");
-            let body = text("more_body").replace("{n}", &extra.to_string());
+            let body = text("more_body").replace("{n}", &total.to_string());
             let image = badge(None);
             let t = toast::Toast {
                 title: &title,
@@ -586,7 +602,7 @@ mod win {
                 actions: &[],
                 tag: "summary",
                 group: "netscope",
-                sound: false,
+                sound: extra_high,
             };
             if toast::show(&t).is_err() {
                 balloon(&title, &body, NIIF_INFO);
@@ -602,7 +618,7 @@ mod win {
         let image = badge(Some(a.category));
         let actions = [
             (text("toast_open"), "netscope://open/alerts".to_string()),
-            (text("toast_mute").replace("{c}", category), format!("netscope://mute/{}", a.category.name())),
+            (text("toast_mute").replace("{c}", category), format!("netscope://mute/{}?k={}", a.category.name(), action_key())),
         ];
         let actions: Vec<(&str, String)> = actions.iter().map(|(l, u)| (l.as_str(), u.clone())).collect();
         let tag = a.id.to_string();
@@ -636,13 +652,38 @@ mod win {
         Mute(Category),
     }
 
-    fn parse_action(url: &str) -> Option<Action> {
+    /// A random key of this process, put into the toast buttons that change settings. Any web
+    /// page can start a `netscope://` URL, so only `open` is accepted without it: a page must
+    /// not be able to mute the security notifications. Buttons of toasts from an earlier run
+    /// carry an old key and only open the window.
+    fn action_key() -> &'static str {
+        static KEY: OnceLock<String> = OnceLock::new();
+        KEY.get_or_init(|| {
+            use std::hash::{BuildHasher, Hasher};
+            // `RandomState` keys come from the OS random source: unguessable for a web page,
+            // which is all this guards against (local programs can edit the settings anyway).
+            let part = |salt: u64| {
+                let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+                h.write_u64(salt);
+                h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+                h.write_u32(std::process::id());
+                h.finish()
+            };
+            format!("{:016x}{:016x}", part(1), part(2))
+        })
+    }
+
+    /// Parses a `netscope://…` URL; actions other than `open` need `?k=<key>` (`action_key`).
+    fn parse_action(url: &str, key: &str) -> Option<Action> {
         let rest = url.strip_prefix(&format!("{}://", toast::SCHEME))?;
+        let (rest, query) = rest.split_once('?').unwrap_or((rest, ""));
+        let keyed = !key.is_empty() && query.split('&').any(|kv| kv.strip_prefix("k=") == Some(key));
         let rest = rest.trim_end_matches('/');
         let mut parts = rest.splitn(2, '/');
         match (parts.next()?, parts.next()) {
             ("open", None) => Some(Action::Open(None)),
             ("open", Some(route)) if route.chars().all(|c| c.is_ascii_alphanumeric() || "/-_".contains(c)) => Some(Action::Open(Some(format!("#/{route}")))),
+            _ if !keyed => None,
             ("snooze", Some(min)) => Some(Action::Snooze(Some(min.parse::<i64>().ok().filter(|m| (1..=24 * 60).contains(m))? * 60))),
             ("snooze", None) => Some(Action::Snooze(Some(SNOOZE_SECS))),
             ("unsnooze", None) => Some(Action::Snooze(None)),
@@ -651,11 +692,19 @@ mod win {
         }
     }
 
+    /// Runs a `netscope://` URL from a toast or a second instance. One that is not accepted
+    /// (unknown, or a settings change without this run's key) only brings the window up.
     fn run_action(url: &str) {
-        let Some(action) = parse_action(url) else {
-            tracing::warn!("ignoring unknown action {url}");
-            return;
-        };
+        match parse_action(url, action_key()) {
+            Some(action) => perform(action),
+            None => {
+                tracing::warn!("action not accepted, opening the window instead: {}", url.split('?').next().unwrap_or(url));
+                show_main();
+            }
+        }
+    }
+
+    fn perform(action: Action) {
         tracing::info!("action: {action:?}");
         match action {
             Action::Open(route) => {
@@ -688,10 +737,13 @@ mod win {
     fn forward_action(url: &str) -> bool {
         let mut data = url.as_bytes().to_vec();
         let cds = COPYDATASTRUCT { dwData: COPYDATA_ACTION, cbData: data.len() as u32, lpData: data.as_mut_ptr().cast() };
-        // SAFETY: the structure and its buffer outlive the synchronous SendMessageW call.
+        // SAFETY: the structure and its buffer outlive the synchronous SendMessageTimeoutW call.
         unsafe {
             let other = FindWindowW(wide(TRAY_CLASS).as_ptr(), null());
-            !other.is_null() && SendMessageW(other, WM_COPYDATA, 0, &cds as *const COPYDATASTRUCT as LPARAM) != 0
+            let mut result = 0usize;
+            !other.is_null()
+                && SendMessageTimeoutW(other, WM_COPYDATA, 0, &cds as *const COPYDATASTRUCT as LPARAM, SMTO_ABORTIFHUNG | SMTO_BLOCK, 5000, &mut result) != 0
+                && result != 0
         }
     }
 
@@ -763,7 +815,8 @@ mod win {
                 item(sub, checked(snoozed), ID_SNOOZE, &snooze_label, Some(glyph::QUIET));
                 AppendMenuW(menu, MF_POPUP | MF_STRING, sub as usize, wide(&text("notify")).as_ptr());
                 let bell = if s.notifications == "off" || snoozed { glyph::BELL_OFF } else { glyph::BELL };
-                set_menu_icon(menu, 3, true, bell, px);
+                // A submenu has no command id: its icon is set by position (the item just added).
+                set_menu_icon(menu, GetMenuItemCount(menu).max(1) as u32 - 1, true, bell, px);
             }
 
             item(menu, checked(autostart_enabled()), ID_AUTOSTART, &text("autostart"), Some(glyph::STARTUP));
@@ -796,11 +849,7 @@ mod win {
             ID_NOTIFY_OFF => save_setting("notifications", "off"),
             ID_SNOOZE => {
                 let s = notify_settings();
-                if s.notify_snooze_until > unix_now() {
-                    run_action("netscope://unsnooze");
-                } else {
-                    run_action("netscope://snooze");
-                }
+                perform(Action::Snooze((s.notify_snooze_until <= unix_now()).then_some(SNOOZE_SECS)));
             }
             id if (ID_CAT_BASE..ID_CAT_BASE + Category::ALL.len()).contains(&id) => {
                 let c = Category::ALL[id - ID_CAT_BASE];
@@ -1271,7 +1320,7 @@ mod win {
                     return;
                 }
                 // The running instance cannot be reached (elevated?): a plain open is still useful.
-                if !matches!(parse_action(url), Some(Action::Open(_))) {
+                if !matches!(parse_action(url, ""), Some(Action::Open(_))) {
                     return;
                 }
             }
@@ -1522,20 +1571,69 @@ mod win {
 
         #[test]
         fn actions_are_parsed_strictly() {
-            assert_eq!(parse_action("netscope://open"), Some(Action::Open(None)));
-            assert_eq!(parse_action("netscope://open/"), Some(Action::Open(None)));
-            assert_eq!(parse_action("netscope://open/alerts"), Some(Action::Open(Some("#/alerts".into()))));
-            assert_eq!(parse_action("netscope://open/conn/42"), Some(Action::Open(Some("#/conn/42".into()))));
-            assert_eq!(parse_action("netscope://open/<script>"), None, "only route characters");
-            assert_eq!(parse_action("netscope://snooze"), Some(Action::Snooze(Some(SNOOZE_SECS))));
-            assert_eq!(parse_action("netscope://snooze/15"), Some(Action::Snooze(Some(900))));
-            assert_eq!(parse_action("netscope://snooze/0"), None);
-            assert_eq!(parse_action("netscope://snooze/100000"), None);
-            assert_eq!(parse_action("netscope://unsnooze"), Some(Action::Snooze(None)));
-            assert_eq!(parse_action("netscope://mute/novelty"), Some(Action::Mute(Category::Novelty)));
-            assert_eq!(parse_action("netscope://mute/everything"), None);
-            assert_eq!(parse_action("http://open"), None);
-            assert_eq!(parse_action("netscope://quit"), None);
+            const K: &str = "0123456789abcdef0123456789abcdef";
+            let p = |u: &str| parse_action(u, K);
+            assert_eq!(p("netscope://open"), Some(Action::Open(None)));
+            assert_eq!(p("netscope://open/"), Some(Action::Open(None)));
+            assert_eq!(p("netscope://open/alerts"), Some(Action::Open(Some("#/alerts".into()))));
+            assert_eq!(p("netscope://open/conn/42"), Some(Action::Open(Some("#/conn/42".into()))));
+            assert_eq!(p("netscope://open/alerts?x=1"), Some(Action::Open(Some("#/alerts".into()))), "a query does not end up in the route");
+            assert_eq!(p("netscope://open/<script>"), None, "only route characters");
+            assert_eq!(p("netscope://open/a?b/c"), Some(Action::Open(Some("#/a".into()))));
+            assert_eq!(p(&format!("netscope://snooze?k={K}")), Some(Action::Snooze(Some(SNOOZE_SECS))));
+            assert_eq!(p(&format!("netscope://snooze/15?k={K}")), Some(Action::Snooze(Some(900))));
+            assert_eq!(p(&format!("netscope://snooze/0?k={K}")), None);
+            assert_eq!(p(&format!("netscope://snooze/100000?k={K}")), None);
+            assert_eq!(p(&format!("netscope://snooze/-5?k={K}")), None);
+            assert_eq!(p(&format!("netscope://unsnooze?k={K}")), Some(Action::Snooze(None)));
+            assert_eq!(p(&format!("netscope://mute/novelty?k={K}")), Some(Action::Mute(Category::Novelty)));
+            assert_eq!(p(&format!("netscope://mute/novelty?x=1&k={K}")), Some(Action::Mute(Category::Novelty)), "the key may be any parameter");
+            assert_eq!(p(&format!("netscope://mute/everything?k={K}")), None);
+            assert_eq!(p("http://open"), None);
+            assert_eq!(p(&format!("netscope://quit?k={K}")), None);
+        }
+
+        #[test]
+        fn settings_changes_need_this_runs_key() {
+            const K: &str = "0123456789abcdef0123456789abcdef";
+            // What a web page could start: no key, a wrong key, an empty key, a key prefix.
+            for url in [
+                "netscope://mute/security".to_string(),
+                "netscope://mute/security?k=".to_string(),
+                "netscope://mute/security?k=deadbeef".to_string(),
+                format!("netscope://mute/security?k={}", &K[..31]),
+                format!("netscope://mute/security?k={K}x"),
+                format!("netscope://mute/security?kk={K}"),
+                format!("netscope://mute/security/?k={K}/"),
+                "netscope://snooze/1440".to_string(),
+                "netscope://snooze".to_string(),
+                "netscope://unsnooze".to_string(),
+            ] {
+                assert_eq!(parse_action(&url, K), None, "{url}");
+            }
+            // Without a key of our own (a second instance that could not reach the running
+            // one) nothing but `open` is accepted, whatever the URL carries.
+            assert_eq!(parse_action("netscope://mute/security?k=", ""), None);
+            assert_eq!(parse_action("netscope://open/alerts", ""), Some(Action::Open(Some("#/alerts".into()))));
+            // The key of this process: random, stable, URL-safe.
+            let k = action_key();
+            assert_eq!(k.len(), 32);
+            assert!(k.chars().all(|c| c.is_ascii_hexdigit()));
+            assert_eq!(k, action_key());
+            assert_eq!(parse_action(&format!("netscope://mute/routes?k={k}"), action_key()), Some(Action::Mute(Category::Routes)));
+        }
+
+        #[test]
+        fn clock_survives_any_timestamp() {
+            for ts in [i64::MIN, -1, i64::MAX, 1_844_674_407_370, settings::MAX_SNOOZE_UNTIL + 1_000_000_000_000] {
+                let _ = clock(ts); // must not panic (debug builds check overflow)
+            }
+            assert_eq!(clock(-1), "");
+            assert_eq!(clock(i64::MAX), "");
+            for ts in [0, 1_760_000_000, settings::MAX_SNOOZE_UNTIL] {
+                let c = clock(ts);
+                assert!(c.len() == 5 && c.as_bytes()[2] == b':', "{ts} -> {c:?}");
+            }
         }
     }
 }

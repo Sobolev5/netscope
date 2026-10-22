@@ -124,6 +124,24 @@ impl RouteInfo {
     pub fn label(&self) -> String {
         self.adapter.clone().unwrap_or_else(|| self.ip.to_string())
     }
+
+    /// The same adapter (by name, or by address where the OS gives no name) in the same role:
+    /// a new address on it is not a move to another network adapter.
+    pub fn same_adapter(&self, other: &RouteInfo) -> bool {
+        self.tunnel == other.tunnel
+            && match (&self.adapter, &other.adapter) {
+                (Some(a), Some(b)) => a == b,
+                _ => self.ip == other.ip,
+            }
+    }
+}
+
+/// Whether a default-route change calls for an egress check soon: any change to a working
+/// route except the first poll (the periodic check at start covers that). Losing the route
+/// does not — a check while offline would only fail — the reconnect does, however long the
+/// gap was.
+fn recheck_egress_after(first_poll: bool, route: Option<&RouteInfo>) -> bool {
+    !first_poll && route.is_some()
 }
 
 /// Where traffic to the internet leaves from, as the routing table says now.
@@ -240,16 +258,16 @@ pub fn spawn_network_watcher(shared: SharedState, stop: Arc<AtomicBool>, egress_
         let mut pending: Option<(Instant, u32)> = None;
         while !stop.load(Ordering::Relaxed) {
             if last_route_poll.is_none_or(|t| t.elapsed() >= ROUTE_POLL) {
+                let first_poll = last_route_poll.is_none();
                 last_route_poll = Some(Instant::now());
                 let now = current_route();
                 if now != route {
                     tracing::info!("default route: {}", now.as_ref().map_or_else(|| "none".to_string(), RouteInfo::label));
-                    let first = route.is_none();
-                    route = now.clone();
-                    shared.write().set_default_route(now);
-                    if !first && egress_enabled {
+                    if egress_enabled && recheck_egress_after(first_poll, now.as_ref()) {
                         pending = Some((Instant::now() + SETTLE, RETRIES));
                     }
+                    route = now.clone();
+                    shared.write().set_default_route(now);
                 }
             }
             let due_periodic = egress_enabled && last_check.is_none_or(|t| t.elapsed() >= RECHECK);
@@ -278,6 +296,26 @@ pub fn spawn_network_watcher(shared: SharedState, stop: Arc<AtomicBool>, egress_
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn route_changes_that_call_for_an_egress_check() {
+        let wifi = RouteInfo { ip: "192.168.1.50".parse().unwrap(), adapter: Some("Wi-Fi".into()), tunnel: false };
+        assert!(!recheck_egress_after(true, Some(&wifi)), "the first poll: the periodic check runs anyway");
+        assert!(!recheck_egress_after(true, None));
+        assert!(!recheck_egress_after(false, None), "offline: a check would only fail");
+        assert!(recheck_egress_after(false, Some(&wifi)), "a reconnect after any gap is checked");
+    }
+
+    #[test]
+    fn same_adapter_ignores_the_address_but_not_the_role() {
+        let r = |ip: &str, adapter: Option<&str>, tunnel| RouteInfo { ip: ip.parse().unwrap(), adapter: adapter.map(Into::into), tunnel };
+        assert!(r("192.168.1.50", Some("Wi-Fi"), false).same_adapter(&r("10.0.0.7", Some("Wi-Fi"), false)), "DHCP renewal, another Wi-Fi network");
+        assert!(!r("192.168.1.50", Some("Wi-Fi"), false).same_adapter(&r("192.168.1.50", Some("Ethernet"), false)));
+        assert!(!r("10.8.0.2", Some("Tun"), false).same_adapter(&r("10.8.0.2", Some("Tun"), true)), "tunnel role differs");
+        assert!(r("172.16.0.5", None, false).same_adapter(&r("172.16.0.5", None, false)));
+        assert!(!r("172.16.0.5", None, false).same_adapter(&r("172.16.0.6", None, false)), "no names: the address decides");
+        assert!(!r("172.16.0.5", Some("Wi-Fi"), false).same_adapter(&r("172.16.0.6", None, false)));
+    }
 
     #[test]
     fn parses_trace_body() {

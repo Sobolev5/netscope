@@ -101,9 +101,11 @@ administrator rights, or for all users when started elevated:
 * **Notifications** are real Windows toasts (Action Center, Focus Assist apply): the kind of alert
   as the title, the localized text, a coloured category badge, and two buttons — *Open* (the
   dashboard's Alerts page) and *Mute: ‹category›*. Clicking a toast opens NetScope through the
-  `netscope:` URL protocol the program registers for the current user (`netscope://open/alerts`,
-  `netscope://snooze/60`, `netscope://mute/novelty`…). A burst of alerts becomes at most three
-  toasts plus one "N more" toast; at most six toasts a minute. High-severity alerts play the
+  `netscope:` URL protocol the program registers for the current user (`netscope://open/alerts`).
+  Any web page can start such a URL, so the buttons that change settings (*Mute*) carry a random
+  key of the running program and are refused without it; a button of a toast from an earlier run
+  only opens the window. A burst of alerts becomes at most three toasts plus one "N more" toast
+  (its count adds up while the bursts go on); at most six toasts a minute. High-severity alerts play the
   notification sound, the others are silent. The informational messages (started, restarted,
   window hidden) use the same toasts; where toasts are unavailable the program falls back to
   tray balloons and says so in the log.
@@ -164,14 +166,17 @@ Memory: 4096 connections, 200 packets each, 96 MiB of stored frames at most.
   the network. Browser notifications can be switched on in the header.
 * **Network alerts**: the default route is polled every 2 s (nothing is sent) — a change of
   adapter is reported with a VPN hint when a tunnel adapter (WireGuard, OpenVPN, AnyConnect…)
-  comes or goes; the public egress address is re-checked a few seconds after each change, so
-  "VPN is on: the internet exit is now 198.51.100.7 (NL)" follows. DNS queries sent to a resolver
-  never seen before (after the first minute, and not right after a network change) are
-  reported too, as is a live capture that stops with an error.
+  comes or goes (a new address on the same adapter is not reported; a reconnect after a moment
+  offline is compared to the adapter before it); the public egress address is re-checked a few
+  seconds after each change and after each reconnect, so "VPN is on: the internet exit is now
+  198.51.100.7 (NL)" follows. DNS queries sent to port 53 of a resolver never seen before (after
+  the first minute, and not right after a network change; queries this machine answers do not
+  count) are reported too, as is a live capture that stops with an error.
 * **Suspicious connections**: outbound TCP to remote-control/malware ports (4444, 1337, 31337,
-  5555, RDP, VNC), SMB/NetBIOS/RPC to the internet, port 25 from a program that is not a mail
-  client, and — 3 s after the connection opened, if it still has no DNS/SNI/Host name — an
-  unsigned program talking to a bare IP on an uncommon port. **Port scans**: 15 distinct ports
+  5555, RDP, VNC), SMB/NetBIOS/RPC to the internet, port 25 from a program that is not a known mail
+  client or server (matched by its whole name), and — 3 s after the connection opened, if it
+  still has no DNS/SNI/Host name — an unsigned program talking to a bare IP on an uncommon port
+  (a program whose signature is still being verified is looked at again for up to a minute). **Port scans**: 15 distinct ports
   of one host within 10 s, inbound (someone scans this machine; high) or outbound (a program
   sweeps a host; medium). **Large uploads**: 200 MiB sent to one external host within 10 minutes.
 * **Code signatures** of every program that uses the network (Authenticode via

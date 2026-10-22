@@ -1,4 +1,4 @@
-﻿//! The traffic model: per-remote-host volumes, protocol mix, bandwidth history,
+//! The traffic model: per-remote-host volumes, protocol mix, bandwidth history,
 //! IP в†’ name mapping learned from DNS answers / TLS SNI / HTTP Host, and alerts.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -256,7 +256,7 @@ pub struct State {
     pub routes: RouteWatch,
     /// On-disk journal of finished connections, DNS lookups and alerts; `None` = not kept.
     journal: Option<Arc<Journal>>,
-    /// Connections seen closed, `(close time Вµs, id)` in order: journaled by `advance` once
+    /// Connections seen closed, `(close time µs, id)` in order: journaled by `advance` once
     /// `CLOSE_GRACE_US` has passed, so a late process attribution still lands in the record.
     close_queue: VecDeque<(i64, u64)>,
     /// DNS servers queries were sent to (bounded); a new one after the learning period is news.
@@ -264,20 +264,25 @@ pub struct State {
     last_resolver: Option<IpAddr>,
     /// The adapter carrying the default route, as last reported by the network watcher.
     route: Option<RouteInfo>,
+    /// The last route there was: a reconnect after a moment without one is compared to it.
+    known_route: Option<RouteInfo>,
     /// Wall-clock time of the last default-route change (resolver changes right after it
     /// are part of the same event).
     last_network_change: i64,
     /// The last successful egress check and whether a tunnel adapter carried the route
     /// then (failed checks in between do not reset the comparison).
     last_egress: Option<(Egress, bool)>,
-    /// New outbound connections to bare IPs, `(deadline Вµs, id)`: judged once a name had
-    /// time to show up (SNI, Host) — see `check_unnamed_connections`.
-    ip_checks: VecDeque<(i64, u64)>,
+    /// New outbound connections to bare IPs, `(deadline µs, id, attempts)`: judged once a
+    /// name had time to show up (SNI, Host) — see `check_unnamed_connections`.
+    ip_checks: VecDeque<(i64, u64, u32)>,
 }
 
 /// A connection to a bare IP gets this long for a name (SNI/Host) to show up before an
 /// unsigned program using it is reported.
 const IP_CHECK_GRACE_US: i64 = 3_000_000;
+/// A connection whose program's signature is not verified yet is looked at again (every
+/// `IP_CHECK_GRACE_US`) this many times: the first check of a new program takes a while.
+const IP_CHECK_ATTEMPTS: u32 = 20;
 /// Resolver changes are not reported this long after a network change.
 const RESOLVER_QUIET_SECS: i64 = 120;
 /// Nothing is learned about resolvers during the first minute (baseline).
@@ -323,6 +328,7 @@ impl State {
             dns_resolvers: HashSet::new(),
             last_resolver: None,
             route: None,
+            known_route: None,
             last_network_change: 0,
             last_egress: None,
             ip_checks: VecDeque::new(),
@@ -589,7 +595,7 @@ impl State {
         let o = self.track_flow(ts_us, wire_len, frame, info, outbound);
         self.watch_probes_and_uploads(sec, len, info, remote, remote_port, outbound, o.id);
         if o.created && outbound && matches!(info.transport, Transport::Tcp { syn: true, ack: false, .. }) && is_external(&remote) {
-            self.ip_checks.push_back((ts_us + IP_CHECK_GRACE_US, o.id));
+            self.ip_checks.push_back((ts_us + IP_CHECK_GRACE_US, o.id, 1));
         }
         // A closed connection is journaled by `advance` after a grace period, so the process
         // found by the next socket-table poll is still part of the record.
@@ -905,19 +911,24 @@ impl State {
         self.egress = Some(r);
     }
 
-    /// The default route moved (or went away). A change from one known adapter to another
-    /// is reported, with a VPN hint when a tunnel adapter came or went.
+    /// The default route moved (or went away). A move to another adapter is reported, with a
+    /// VPN hint when a tunnel adapter came or went; a reconnect after a moment without a route
+    /// is compared to the route before it. A new address on the same adapter (DHCP renewal,
+    /// another Wi-Fi network) is not news here — the egress check reports a new exit.
     pub fn set_default_route(&mut self, route: Option<RouteInfo>) {
         let now = unix_now();
-        if let (Some(prev), Some(next)) = (&self.route, &route) {
-            if prev != next {
+        if route != self.route && self.known_route.is_some() {
+            // Resolver changes right after this are part of the same event.
+            self.last_network_change = now;
+        }
+        if let (Some(prev), Some(next)) = (&self.known_route, &route) {
+            if !prev.same_adapter(next) {
                 let vpn = match (prev.tunnel, next.tunnel) {
                     (false, true) => "on",
                     (true, false) => "off",
                     _ => "",
                 };
                 let (before, after) = (prev.label(), next.label());
-                self.last_network_change = now;
                 self.alert_at(now, NewAlert {
                     severity: Severity::Medium,
                     kind: AlertKind::NetworkChange,
@@ -938,6 +949,9 @@ impl State {
                     key: format!("net:{}", next.ip),
                 });
             }
+        }
+        if route.is_some() {
+            self.known_route = route.clone();
         }
         self.route = route;
     }
@@ -1084,7 +1098,7 @@ impl State {
     /// program talking to an address with no DNS/SNI/Host name on an uncommon port.
     fn check_unnamed_connections(&mut self) {
         let now_us = self.now.saturating_mul(1_000_000);
-        while let Some(&(deadline, id)) = self.ip_checks.front() {
+        while let Some(&(deadline, id, attempts)) = self.ip_checks.front() {
             if deadline > now_us {
                 break;
             }
@@ -1101,7 +1115,14 @@ impl State {
             {
                 continue;
             }
-            if !self.signature_for(&p).is_some_and(|s| matches!(s.status, SigStatus::Unsigned | SigStatus::Invalid)) {
+            let Some(sig) = self.signature_for(&p) else {
+                // Not verified yet: look again later (the deadline stays after the others').
+                if attempts < IP_CHECK_ATTEMPTS {
+                    self.ip_checks.push_back((now_us + IP_CHECK_GRACE_US, id, attempts + 1));
+                }
+                continue;
+            };
+            if !matches!(sig.status, SigStatus::Unsigned | SigStatus::Invalid) {
                 continue;
             }
             let endpoint = remote.to_string();
@@ -1199,7 +1220,11 @@ impl State {
                 }
             }
             App::Dns(m) => {
-                if !remote.is_multicast() && !matches!(remote_port, 5353 | 5355) && !m.questions.is_empty() {
+                // A query to port 53 of another machine: that machine is our resolver. Queries
+                // this machine answers (hotspot, local DNS server) come from clients' ephemeral
+                // ports or, once a client is learned as local, go to our own address; mDNS and
+                // LLMNR use their own ports.
+                if remote_port == 53 && !remote.is_multicast() && !self.local.contains(&remote) && !m.questions.is_empty() {
                     self.note_resolver(remote);
                 }
                 for q in &m.questions {
@@ -1379,13 +1404,17 @@ fn suspicious_port(port: u16, process: &str) -> Option<(&'static str, &'static s
 }
 
 /// Programs expected to talk SMTP (port 25) themselves.
+/// Known mail clients and servers, by program name (without `.exe`, any case). The whole
+/// name must match: a substring test would let "notmailware.exe" send mail unnoticed.
 fn is_mail_program(name: &str) -> bool {
     const MAIL: &[&str] = &[
-        "outlook", "thunderbird", "betterbird", "mail", "postbox", "mailbird", "emclient", "em client", "evolution", "kmail", "sendmail",
-        "postfix", "exim", "msmtp", "hmailserver", "mailenable", "smtp",
+        "outlook", "olk", "hxoutlook", "hxtsr", "thunderbird", "betterbird", "mail", "postbox", "mailbird", "mailclient", "emclient",
+        "evolution", "kmail", "geary", "mutt", "neomutt", "claws-mail", "sylpheed", "sendmail", "postfix", "smtp", "smtpd", "exim",
+        "exim4", "msmtp", "hmailserver", "mailenable", "memta",
     ];
-    let n = name.to_lowercase();
-    MAIL.iter().any(|k| n.contains(k))
+    let n = name.trim().to_lowercase();
+    let n = n.strip_suffix(".exe").unwrap_or(&n);
+    MAIL.contains(&n)
 }
 
 #[cfg(test)]
@@ -1687,11 +1716,80 @@ mod tests {
         assert_eq!(a.len(), 4);
         assert_eq!((a[0].kind, a[0].details["vpn"].as_str()), (AlertKind::EgressChange, "off"));
         assert_eq!((a[1].kind, a[1].details["vpn"].as_str()), (AlertKind::NetworkChange, "off"));
-        // Losing the route is not reported; the next route after that is compared to nothing.
+        // Losing the route is not reported; coming back to the same adapter is not either.
+        s.set_default_route(None);
+        assert_eq!(s.default_route(), None);
+        s.set_default_route(Some(RouteInfo { ip: ip("192.168.1.50"), adapter: Some("Wi-Fi".into()), tunnel: false }));
+        assert_eq!(s.alerts.recent(10).len(), 4);
+        // A reconnect elsewhere is compared to the route before the gap.
         s.set_default_route(None);
         s.set_default_route(Some(RouteInfo { ip: ip("172.16.0.5"), adapter: None, tunnel: false }));
-        assert_eq!(s.alerts.recent(10).len(), 4);
+        let a = s.alerts.recent(10);
+        assert_eq!(a.len(), 5);
+        assert_eq!((a[0].kind, a[0].details["before"].as_str(), a[0].details["after"].as_str()), (AlertKind::NetworkChange, "Wi-Fi", "172.16.0.5"));
         assert_eq!(s.default_route().unwrap().label(), "172.16.0.5");
+    }
+
+    #[test]
+    fn a_new_address_on_the_same_adapter_is_not_a_network_change() {
+        let mut s = state();
+        let wifi = |addr: &str| Some(RouteInfo { ip: ip(addr), adapter: Some("Wi-Fi".into()), tunnel: false });
+        s.set_default_route(wifi("192.168.1.50"));
+        assert_eq!(s.last_network_change, 0, "the first route is not a change");
+        s.set_default_route(wifi("192.168.1.51"));
+        s.set_default_route(wifi("10.20.30.40"));
+        assert!(s.alerts.recent(10).is_empty(), "DHCP renewal / another Wi-Fi network: {:?}", s.alerts.recent(10));
+        assert!(s.last_network_change > 0, "still a change for the resolver quiet period");
+        assert_eq!(s.default_route().unwrap().ip, ip("10.20.30.40"));
+        // The same adapter turning into a tunnel is a change of role.
+        s.set_default_route(Some(RouteInfo { ip: ip("10.20.30.40"), adapter: Some("Wi-Fi".into()), tunnel: true }));
+        assert_eq!(s.alerts.recent(10)[0].details["vpn"], "on");
+    }
+
+    #[test]
+    fn a_reconnect_starts_the_resolver_quiet_period() {
+        let mut s = state();
+        let query = |name: &str| App::Dns(dns::parse(&dns::build_query(1, name, dns::TYPE_A)).unwrap());
+        s.set_default_route(Some(RouteInfo { ip: ip(ME), adapter: Some("Wi-Fi".into()), tunnel: false }));
+        s.record(us(T0), 80, Some(&pkt(ME, "192.168.1.1", 5000, 53, Proto::Dns, query("a.example"))));
+        s.record(us(T0 + 61), 80, Some(&pkt(ME, "192.168.1.1", 5000, 53, Proto::Dns, query("a.example"))));
+        // Offline for a while, then back on another network with its own resolver.
+        s.set_default_route(None);
+        s.set_default_route(Some(RouteInfo { ip: ip(ME), adapter: Some("Wi-Fi".into()), tunnel: false }));
+        s.record(us(T0 + 300), 80, Some(&pkt(ME, "10.0.0.1", 5000, 53, Proto::Dns, query("b.example"))));
+        assert!(s.alerts.recent(10).is_empty(), "{:?}", s.alerts.recent(10));
+    }
+
+    #[test]
+    fn queries_this_machine_answers_are_not_resolvers() {
+        let mut s = state();
+        let query = |name: &str| App::Dns(dns::parse(&dns::build_query(1, name, dns::TYPE_A)).unwrap());
+        s.record(us(T0), 80, Some(&pkt(ME, "192.168.1.1", 5000, 53, Proto::Dns, query("a.example"))));
+        // After the learning minute: hotspot / local DNS server clients ask this machine.
+        for (n, client) in ["192.168.137.5", "192.168.137.6", "10.0.0.9"].iter().enumerate() {
+            let t = T0 + 61 + n as i64;
+            s.record(us(t), 80, Some(&pkt(client, ME, 50000 + n as u16, 53, Proto::Dns, query("x.example"))));
+            s.record(us(t), 80, Some(&pkt(client, ME, 50100 + n as u16, 53, Proto::Dns, query("y.example"))));
+        }
+        // Queries to a resolver on an unusual port (not DNS-over-53) are not resolver changes.
+        s.record(us(T0 + 70), 80, Some(&pkt(ME, "203.0.113.53", 5000, 5300, Proto::Dns, query("z.example"))));
+        let a: Vec<_> = s.alerts.recent(10).into_iter().filter(|a| a.kind == AlertKind::DnsResolverChange).collect();
+        assert!(a.is_empty(), "{a:?}");
+        // A real new resolver is still reported.
+        s.record(us(T0 + 71), 80, Some(&pkt(ME, "9.9.9.9", 5001, 53, Proto::Dns, query("q.example"))));
+        let a: Vec<_> = s.alerts.recent(10).into_iter().filter(|a| a.kind == AlertKind::DnsResolverChange).collect();
+        assert_eq!(a.len(), 1);
+        assert_eq!(a[0].details["after"], "9.9.9.9");
+    }
+
+    #[test]
+    fn mail_programs_match_by_whole_name() {
+        for name in ["thunderbird.exe", "OUTLOOK.EXE", "olk.exe", "HxTsr.exe", "MailClient.exe", "mail", "exim4", "smtp"] {
+            assert!(is_mail_program(name), "{name}");
+        }
+        for name in ["notmailware.exe", "smtp-backdoor.exe", "mailstealer.exe", "outlook-update.exe", "", ".exe"] {
+            assert!(!is_mail_program(name), "{name}");
+        }
     }
 
     #[test]
@@ -1751,6 +1849,34 @@ mod tests {
         let unnamed: Vec<&super::super::Alert> = a.iter().filter(|x| x.details.get("reason").is_some_and(|r| r == "unsigned_ip")).collect();
         assert_eq!(unnamed.len(), 1, "{a:?}");
         assert_eq!((unnamed[0].details["process"].as_str(), unnamed[0].details["endpoint"].as_str()), ("dropper.exe", "203.0.113.9:9999"));
+    }
+
+    #[test]
+    fn a_bare_ip_connection_waits_for_the_signature_check() {
+        let mut s = state();
+        s.record(us(T0), 60, Some(&syn(ME, "203.0.113.9", 5007, 9999)));
+        s.record(us(T0), 60, Some(&syn(ME, "203.0.113.10", 5008, 9999)));
+        s.set_owners(owners(
+            vec![(SockProto::Tcp, "192.168.1.50:5007", Some("203.0.113.9:9999"), 11), (SockProto::Tcp, "192.168.1.50:5008", Some("203.0.113.10:9999"), 12)],
+            vec![(11, "fresh.exe", Some(r"C:	oolsresh.exe")), (12, "slow.exe", Some(r"C:	ools\slow.exe"))],
+        ));
+        let unsigned_ip = |s: &State| s.alerts.recent(20).into_iter().filter(|a| a.details.get("reason").is_some_and(|r| r == "unsigned_ip")).map(|a| a.details["process"].clone()).collect::<Vec<_>>();
+        // The grace period is over, but the (slow) Authenticode check has not answered yet.
+        s.advance(T0 + 4);
+        assert!(unsigned_ip(&s).is_empty());
+        assert_eq!(s.ip_checks.len(), 2, "both connections are queued again");
+        // The answer arrives ten seconds later: the connection is still judged.
+        let mut sigs = HashMap::new();
+        sigs.insert(r"C:	oolsresh.exe".to_string(), Signature { status: SigStatus::Unsigned, signer: None });
+        s.set_signatures(sigs);
+        s.advance(T0 + 14);
+        assert_eq!(unsigned_ip(&s), vec!["fresh.exe".to_string()]);
+        // A program whose signature never gets checked is given up on after a bounded time.
+        for t in 15..(15 + 4 * IP_CHECK_ATTEMPTS as i64) {
+            s.advance(T0 + t);
+        }
+        assert!(s.ip_checks.is_empty(), "{:?}", s.ip_checks);
+        assert_eq!(unsigned_ip(&s).len(), 1);
     }
 
     #[test]

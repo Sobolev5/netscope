@@ -1116,7 +1116,7 @@ async function saveSettings() {
   const st = ui.settings, f = st.form;
   if (!f || st.saving) return;
   st.saving = true; st.status = null; renderView();
-  const body = { port: f.port.trim() === "" ? null : Number(f.port), port_auto: f.port.trim() === "", host: f.host.trim(), interface: f.interface, filter: f.filter.trim(), promiscuous: f.promiscuous, verbose: f.verbose, egress_check: f.egress_check, show_window: f.show_window, notifications: f.notifications, journal_days: Number(f.journal_days), notify_categories: ["security", "novelty", "network", "routes"].filter((c) => f["cat_" + c]), notify_snooze_until: f.notify_snooze_until || 0 };
+  const body = { port: f.port.trim() === "" ? null : Number(f.port), port_auto: f.port.trim() === "", host: f.host.trim(), interface: f.interface, filter: f.filter.trim(), promiscuous: f.promiscuous, verbose: f.verbose, egress_check: f.egress_check, show_window: f.show_window, notifications: f.notifications, journal_days: Number(f.journal_days), notify_categories: ["security", "novelty", "network", "routes"].filter((c) => f["cat_" + c]) };
   if (st.data && st.data.autostart !== null && st.data.autostart !== undefined) body.autostart = !!f.autostart;
   try {
     const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -1126,6 +1126,18 @@ async function saveSettings() {
     st.saving = false;
     await loadSettings();
   } catch (e) { st.status = { error: String(e.message || e) }; st.saving = false; renderView(); }
+}
+
+// Ends the quiet period alone: the rest of the form (maybe edited, not saved) is not sent,
+// and a snooze set from the tray or a toast after the page loaded is not overwritten by Save.
+async function unsnooze() {
+  const st = ui.settings;
+  try {
+    const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notify_snooze_until: 0 }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error && j.error.message ? j.error.message : r.statusText); }
+    if (st.form) st.form.notify_snooze_until = 0;
+  } catch (e) { st.status = { error: String(e.message || e) }; }
+  if (route.name === "settings") renderView();
 }
 
 async function restartNow() {
@@ -1550,7 +1562,7 @@ $("view").addEventListener("click", (ev) => {
   if ((x = hit("[data-jrange]"))) { ui.journal.range = x.dataset.jrange; renderView(); refreshJournal(); return; }
   if (el.id === "journal-refresh") { ui.journal.stats = null; refreshJournal(); return; }
   if (el.id === "set-restart") { restartNow(); }
-  if (el.id === "set-unsnooze" && ui.settings.form) { ui.settings.form.notify_snooze_until = 0; saveSettings(); }
+  if (el.id === "set-unsnooze") { unsnooze(); }
 });
 
 // Settings form: keep the edited values in ui.settings.form (the page re-renders on save).

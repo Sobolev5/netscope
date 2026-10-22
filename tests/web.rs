@@ -806,6 +806,24 @@ async fn settings_page_round_trip_validation_and_restart() {
     let (st, r) = post_json(addr, "/api/settings", "{}").await;
     assert_eq!((st, &r), (200, &serde_json::json!({ "saved": true, "restart_required": false })));
 
+    // Ending a snooze from the page sends that key alone: everything else stays as saved.
+    let (st, _) = post_json(addr, "/api/settings", r#"{"notify_categories": ["security"], "notify_snooze_until": 1760000000}"#).await;
+    assert_eq!(st, 200);
+    let before = std::fs::read_to_string(&ini).unwrap();
+    let (st, r) = post_json(addr, "/api/settings", r#"{"notify_snooze_until": 0}"#).await;
+    assert_eq!((st, &r), (200, &serde_json::json!({ "saved": true, "restart_required": false })));
+    let after = std::fs::read_to_string(&ini).unwrap();
+    assert_eq!(after, before.replace("notify_snooze_until=1760000000", "notify_snooze_until=0"), "only the snooze line changed");
+    // An absurd snooze is clamped (it would overflow the tray's clock), not stored.
+    let (st, _) = post_json(addr, "/api/settings", r#"{"notify_snooze_until": 9000000000000000000}"#).await;
+    assert_eq!(st, 200);
+    let (_, body) = get(addr, "/api/settings").await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["values"]["notify_snooze_until"].as_i64(), Some(netscope::settings::MAX_SNOOZE_UNTIL));
+    assert_eq!(v["values"]["notify_categories"], serde_json::json!(["security"]));
+    let (st, _) = post_json(addr, "/api/settings", r#"{"notify_snooze_until": 0, "notify_categories": ["security", "novelty", "network", "routes"]}"#).await;
+    assert_eq!(st, 200);
+
     // The journal retention: saved to the file and applied to the running journal at once.
     let (st, r) = post_json(addr, "/api/settings", r#"{"journal_days": 3}"#).await;
     assert_eq!((st, &r), (200, &serde_json::json!({ "saved": true, "restart_required": false })));

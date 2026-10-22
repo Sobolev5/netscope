@@ -11,6 +11,7 @@ use std::ffi::c_void;
 use std::path::Path;
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use libloading::Library;
 use windows_sys::core::{GUID, HRESULT, PCWSTR};
@@ -205,8 +206,12 @@ struct Toaster {
 }
 
 thread_local! {
-    static TOASTER: RefCell<Option<Result<Toaster, String>>> = const { RefCell::new(None) };
+    /// The notifier, or why it could not be created and when (retried after `INIT_RETRY`).
+    static TOASTER: RefCell<Option<Result<Toaster, (String, Instant)>>> = const { RefCell::new(None) };
 }
+
+/// A failed notifier is tried again after this long (e.g. the shell was still starting).
+const INIT_RETRY: Duration = Duration::from_secs(60);
 
 fn toaster_init() -> Result<Toaster, String> {
     let rt = runtime()?;
@@ -309,8 +314,11 @@ pub fn xml(t: &Toast) -> String {
 pub fn show(t: &Toast) -> Result<(), String> {
     TOASTER.with(|cell| {
         let mut slot = cell.borrow_mut();
-        let toaster = slot.get_or_insert_with(toaster_init);
-        let toaster = toaster.as_ref().map_err(Clone::clone)?;
+        if matches!(&*slot, Some(Err((_, at))) if at.elapsed() >= INIT_RETRY) {
+            *slot = None;
+        }
+        let toaster = slot.get_or_insert_with(|| toaster_init().map_err(|e| (e, Instant::now())));
+        let toaster = toaster.as_ref().map_err(|(e, _)| e.clone())?;
         let rt = runtime()?;
         // The XML document.
         let class = HStr::new(rt, "Windows.Data.Xml.Dom.XmlDocument")?;

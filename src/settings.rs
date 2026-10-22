@@ -35,6 +35,9 @@ pub const KEYS: [&str; 13] = [
 /// Longest journal retention the settings accept (days).
 pub const MAX_JOURNAL_DAYS: u32 = 365;
 pub const NOTIFICATION_LEVELS: [&str; 3] = ["medium", "high", "off"];
+/// The latest `notify_snooze_until` accepted (9999-12-31T23:59:59Z): anything later is a
+/// typo or a hostile value, and it would overflow the conversion to a Windows file time.
+pub const MAX_SNOOZE_UNTIL: i64 = 253_402_300_799;
 
 /// Where the settings live: `<data dir>/netscope.ini`.
 pub fn settings_path() -> PathBuf {
@@ -285,7 +288,7 @@ impl Settings {
                     Ok(c) => s.notify_categories = c,
                     Err(e) => tracing::warn!("{FILE_NAME}: ignoring notify_categories={v}: {e}"),
                 },
-                "notify_snooze_until" => s.notify_snooze_until = v.trim().parse::<i64>().unwrap_or(0).max(0),
+                "notify_snooze_until" => s.notify_snooze_until = v.trim().parse::<i64>().unwrap_or(0).clamp(0, MAX_SNOOZE_UNTIL),
                 "journal_days" if !v.is_empty() => match v.parse::<u32>() {
                     Ok(d) if d <= MAX_JOURNAL_DAYS => s.journal_days = d,
                     _ => tracing::warn!("{FILE_NAME}: ignoring journal_days={v}: not a number between 0 and {MAX_JOURNAL_DAYS}"),
@@ -396,7 +399,7 @@ impl Settings {
             next.notify_categories = parse_categories(&c.join(","))?;
         }
         if let Some(t) = patch.notify_snooze_until {
-            next.notify_snooze_until = t.max(0);
+            next.notify_snooze_until = t.clamp(0, MAX_SNOOZE_UNTIL);
         }
         if let Some(i) = &patch.interface {
             next.interface = non_empty(i);
@@ -474,6 +477,10 @@ mod tests {
         let s = Settings::from_pairs(&[("notify_snooze_until".into(), "-5".into()), ("notifications".into(), "off".into())]);
         assert_eq!(s.notify_snooze_until, 0);
         assert!(!s.notifies(Category::Network, 0), "off is off");
+        for huge in ["9000000000000000", "9223372036854775807", "99999999999999999999"] {
+            let s = Settings::from_pairs(&[("notify_snooze_until".into(), huge.into())]);
+            assert!(s.notify_snooze_until <= MAX_SNOOZE_UNTIL, "{huge} -> {}", s.notify_snooze_until);
+        }
 
         let mut s = Settings::default();
         let bad = SettingsPatch { notify_categories: Some(vec!["network".into(), "nope".into()]), ..SettingsPatch::default() };
@@ -482,6 +489,8 @@ mod tests {
         let ok = SettingsPatch { notify_categories: Some(vec!["routes".into(), "network".into()]), notify_snooze_until: Some(-1), ..SettingsPatch::default() };
         s.apply(&ok).unwrap();
         assert_eq!((s.notify_categories.clone(), s.notify_snooze_until), (vec![Category::Network, Category::Routes], 0));
+        s.apply(&SettingsPatch { notify_snooze_until: Some(i64::MAX), ..SettingsPatch::default() }).unwrap();
+        assert_eq!(s.notify_snooze_until, MAX_SNOOZE_UNTIL, "an absurd snooze is clamped, not stored");
         assert!(!s.needs_restart(&Settings::default()), "notification keys apply on the fly");
         assert_eq!(parse_categories("security,novelty,network,routes").unwrap(), Category::ALL.to_vec());
     }
