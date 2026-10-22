@@ -4,8 +4,10 @@
 //! plain HTTP with responses, ICMP, mDNS) that go through the normal decoder and
 //! analytics, plus a matching fake OS socket table so every connection belongs to a
 //! plausible process (VS Code, Chrome, Spotify, svchost...). A scripted set of
-//! incidents makes every alert type show up within ~15 seconds: credentials over
-//! HTTP, a DNS-tunneling lookup, an upload spike to an unknown host and Telnet.
+//! incidents makes the alert types show up: within ~15 seconds credentials over HTTP, a
+//! DNS-tunneling lookup, an upload spike to an unknown host (on a remote-control port,
+//! so also a suspicious connection), Telnet and a port scan from the LAN; after the
+//! learning minute a DNS query to a resolver never used before.
 
 pub mod frames;
 
@@ -83,6 +85,8 @@ const SITES: &[Site] = &[
 
 const EXFIL_HOST: [u8; 4] = [203, 0, 113, 77];
 const TELNET_HOST: [u8; 4] = [198, 51, 100, 23];
+const SCANNER_HOST: [u8; 4] = [192, 168, 1, 66];
+const OTHER_RESOLVER: [u8; 4] = [8, 8, 8, 8];
 const EXFIL_PORT: u16 = 51_000;
 
 /// The fake socket table, shared between the script and [`DemoOwners`].
@@ -295,6 +299,21 @@ impl Script {
             let mut c = Conn { port: self.port(), seq_out: 77, seq_in: 1 };
             self.register(SockProto::Tcp, c.port, Some((TELNET_HOST, 23)), TELNET);
             Self::send(&mut c, out, TELNET_HOST, 23, true, TcpFlags::Syn, b"");
+        }
+        // Incident 5: another machine on the LAN sweeps our ports (two per tick for a second).
+        if (200..210).contains(&(t % 1200)) {
+            let k = (t % 1200 - 200) as u16;
+            for port in [20 + 2 * k, 21 + 2 * k] {
+                out.push(tcp_frame_seq(SCANNER_HOST, LOCAL_IP, 40_000 + port, port, TcpFlags::Syn, 1, b""));
+            }
+        }
+        // Incident 6: after the learning minute, the system resolver is suddenly a public one.
+        if t % 1500 == 700 {
+            let id = self.dns_id;
+            self.dns_id = self.dns_id.wrapping_add(1);
+            let port = self.port();
+            self.register(SockProto::Udp, port, None, SVCHOST);
+            out.push(udp_frame(LOCAL_IP, OTHER_RESOLVER, port, 53, &dns::build_query(id, "time.windows.com", dns::TYPE_A)));
         }
     }
 }

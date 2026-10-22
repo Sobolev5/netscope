@@ -81,30 +81,39 @@ fn every_literal_translation_key_exists() {
 fn backend_enums_have_labels() {
     let en = dict_keys("  en: {");
     let ru = dict_keys("  ru: {");
-    let kinds = [
-        AlertKind::SensitiveHttp,
-        AlertKind::SuspiciousDns,
-        AlertKind::VolumeSpike,
-        AlertKind::CleartextProtocol,
-        AlertKind::NewProcess,
-        AlertKind::NewDestination,
-        AlertKind::NewCountry,
-        AlertKind::NewListener,
-        AlertKind::UnsignedProcess,
-        AlertKind::RouteChange,
-        AlertKind::LatencyIncrease,
-    ];
-    for k in kinds {
+    for k in AlertKind::ALL {
         let name = serde_name(k);
         for dict in [&en, &ru] {
             assert!(dict.contains(&format!("kind_{name}")), "kind_{name}");
-            if name != "suspicious_dns" {
+            // Kinds whose text depends on a detail have one key per variant (checked below).
+            if !matches!(name.as_str(), "suspicious_dns" | "suspicious_connection" | "port_scan") {
                 assert!(dict.contains(&format!("alert_{name}")), "alert_{name}");
             }
         }
     }
-    for reason in ["long_name", "long_label", "entropy", "rare_type"] {
-        assert!(en.contains(&format!("alert_dns_{reason}")) && ru.contains(&format!("alert_dns_{reason}")), "{reason}");
+    let variants = [
+        "alert_dns_long_name",
+        "alert_dns_long_label",
+        "alert_dns_entropy",
+        "alert_dns_rare_type",
+        "alert_unsigned_process_risky",
+        "alert_susp_remote_control",
+        "alert_susp_smb",
+        "alert_susp_mail",
+        "alert_susp_unsigned_ip",
+        "alert_port_scan_in",
+        "alert_port_scan_out",
+        "alert_network_change_on",
+        "alert_network_change_off",
+        "alert_egress_change_on",
+        "alert_egress_change_off",
+    ];
+    for key in variants {
+        assert!(en.contains(key) && ru.contains(key), "{key}");
+    }
+    for c in netscope::analytics::Category::ALL {
+        let key = format!("cat_{}", c.name());
+        assert!(en.contains(&key) && ru.contains(&key), "{key}");
     }
     for st in [FlowState::Opening, FlowState::Established, FlowState::Closing, FlowState::Closed, FlowState::Active] {
         let name = serde_name(st);

@@ -232,7 +232,9 @@ pub fn run_with_host(
     let stop = Arc::new(AtomicBool::new(false));
     let pacing = if args.realtime { Pacing::Realtime } else { Pacing::Fast };
     let capture = engine::spawn(opened.source, shared.clone(), stop.clone(), pacing).context("starting capture thread")?;
-    let egress = if check_egress { Some(netpath::spawn_egress_checker(shared.clone(), stop.clone()).context("starting egress check")?) } else { None };
+    // The default route (adapter changes, VPN up/down) is watched on a live capture; the
+    // egress check rides along when allowed.
+    let egress = if live_capture { Some(netpath::spawn_network_watcher(shared.clone(), stop.clone(), check_egress).context("starting network watcher")?) } else { None };
     // Signatures only mean something for programs on this machine (live capture).
     let signatures = if live_capture {
         Some(procs::signature::spawn_checker(shared.clone(), stop.clone()).context("starting signature checker")?)
@@ -309,7 +311,7 @@ pub fn run_with_host(
     }
     // The helpers may be inside slow blocking calls (a signature check, a traceroute, a
     // connect to a black-holed network); they are daemons, so do not make Ctrl+C wait.
-    for (name, h) in [("process tracker", refresher), ("egress check", egress), ("signature checker", signatures), ("route watcher", watcher)] {
+    for (name, h) in [("process tracker", refresher), ("network watcher", egress), ("signature checker", signatures), ("route watcher", watcher)] {
         if let Some(h) = h {
             join_with_grace(name, h, Duration::from_secs(2));
         }

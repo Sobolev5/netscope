@@ -39,9 +39,12 @@ and runs the demo (`netscope --demo`). The binaries are not code-signed yet, so 
 * **Filters** such as `chrome tls`, `process == Code.exe and country != RU`, `bytes > 1MB and not signed`.
 * **TLS** — JA4 client fingerprints, SNI/ALPN, server version and cipher, certificate chain (TLS ≤ 1.2).
 * **DNS journal**, encrypted DNS (DoH/DoT/DoQ) detection, suspicious-name alerts (tunneling, exfiltration).
-* **Alerts** — credentials over HTTP, cleartext protocols, traffic spikes, programs going online for the first time,
-  new destinations/countries, new open ports, unsigned programs, route changes, latency increases.
-  Shown as Windows notifications by the desktop app.
+* **Alerts** — credentials over HTTP, cleartext protocols, traffic spikes, port scans, suspicious connections
+  (remote-control ports, SMB to the internet, direct SMTP, unsigned programs on bare IPs), large uploads, programs
+  going online for the first time, new destinations/countries, new open ports, unsigned programs, VPN on/off and
+  other network changes (exit address, adapter, DNS resolver), route changes, latency increases, a stopped capture.
+  The desktop app shows them as **Windows notifications** with a category icon and buttons; the tray menu
+  chooses the level, the categories and a quiet hour.
 * **Where traffic goes** — an offline map with zoom and pan, the public exit address, VPN/proxy clients,
   route tracing with watched routes.
 * **Journal on disk** — finished connections, DNS lookups and alerts kept for N days (default 1), searchable and
@@ -89,10 +92,21 @@ administrator rights, or for all users when started elevated:
 * **NetScope** in the Start menu / on the desktop starts `netscope-app.exe`: a normal program
   window with the dashboard inside (Microsoft Edge WebView2 — part of Windows 11, installed by
   the setup on Windows 10 when missing), no console, an icon in the notification area.
-  Closing the window keeps the capture running in the tray; the icon's menu: open NetScope,
-  open in the browser, alert notifications (shown as Windows notifications), start with
-  Windows, download geolocation data, open the log, quit. A second start brings the window up.
-  Without WebView2 the dashboard opens in the default browser instead.
+  Closing the window keeps the capture running in the tray; the icon's menu (with icons): open
+  NetScope, open in the browser, **Notifications** (a submenu: *High and medium* / *High only* /
+  *Off*, the four categories **Security**, **New activity**, **Network and VPN**, **Routes** as
+  check marks, and *Quiet for an hour*), start with Windows, download geolocation data, open the
+  log, quit. A second start brings the window up. Without WebView2 the dashboard opens in the
+  default browser instead.
+* **Notifications** are real Windows toasts (Action Center, Focus Assist apply): the kind of alert
+  as the title, the localized text, a coloured category badge, and two buttons — *Open* (the
+  dashboard's Alerts page) and *Mute: ‹category›*. Clicking a toast opens NetScope through the
+  `netscope:` URL protocol the program registers for the current user (`netscope://open/alerts`,
+  `netscope://snooze/60`, `netscope://mute/novelty`…). A burst of alerts becomes at most three
+  toasts plus one "N more" toast; at most six toasts a minute. High-severity alerts play the
+  notification sound, the others are silent. The informational messages (started, restarted,
+  window hidden) use the same toasts; where toasts are unavailable the program falls back to
+  tray balloons and says so in the log.
 * The installer checks for **Npcap** (the packet capture driver) and offers to download it
   from npcap.com and run its installer — Npcap's license does not allow bundling it. Without
   it the program explains what is missing and where to get it.
@@ -101,9 +115,11 @@ administrator rights, or for all users when started elevated:
   cloudflare.com.
 * **Settings** live in `%LOCALAPPDATA%\NetScope\netscope.ini` (`key=value`: `port`, `host`,
   `interface`, `filter`, `geoip`, `egress_check`, `promiscuous`, `verbose`, `show_window`
-  (0 = start hidden in the tray), `notifications` (`medium`, `high` or `off`), `journal_days`
-  (days of journal kept, 0 = none)). The
-  dashboard's **Settings** page (`#/settings`) edits the same file: notifications, the
+  (0 = start hidden in the tray), `notifications` (`medium`, `high` or `off`),
+  `notify_categories` (comma-separated subset of `security,novelty,network,routes`; a missing
+  key means all), `notify_snooze_until` (unix time until which notifications are muted, 0 = not
+  muted), `journal_days` (days of journal kept, 0 = none)). The
+  dashboard's **Settings** page (`#/settings`) edits the same file: the notification keys, the
   window option and the journal retention apply at once; changes to the capture (interface, filter, promiscuous mode),
   the dashboard address or port, the geolocation directory and logging take effect after a
   restart — "Restart now" on the page does it in the desktop app. Command-line arguments to
@@ -146,6 +162,18 @@ Memory: 4096 connections, 200 packets each, 96 MiB of stored frames at most.
 * **"First seen" alerts** (after a 60 s learning period): a program going online for the
   first time, contacting a new domain/provider or a new country, a new port reachable from
   the network. Browser notifications can be switched on in the header.
+* **Network alerts**: the default route is polled every 2 s (nothing is sent) — a change of
+  adapter is reported with a VPN hint when a tunnel adapter (WireGuard, OpenVPN, AnyConnect…)
+  comes or goes; the public egress address is re-checked a few seconds after each change, so
+  "VPN is on: the internet exit is now 198.51.100.7 (NL)" follows. DNS queries sent to a resolver
+  never seen before (after the first minute, and not right after a network change) are
+  reported too, as is a live capture that stops with an error.
+* **Suspicious connections**: outbound TCP to remote-control/malware ports (4444, 1337, 31337,
+  5555, RDP, VNC), SMB/NetBIOS/RPC to the internet, port 25 from a program that is not a mail
+  client, and — 3 s after the connection opened, if it still has no DNS/SNI/Host name — an
+  unsigned program talking to a bare IP on an uncommon port. **Port scans**: 15 distinct ports
+  of one host within 10 s, inbound (someone scans this machine; high) or outbound (a program
+  sweeps a host; medium). **Large uploads**: 200 MiB sent to one external host within 10 minutes.
 * **Code signatures** of every program that uses the network (Authenticode via
   `Get-AuthenticodeSignature` on Windows, `codesign` on macOS); unsigned programs — especially
   from Temp/Downloads — raise alerts.
@@ -212,12 +240,12 @@ capture thread (std::thread)                     tokio runtime
 |---|---|
 | `capture/` | `ffi` (libpcap symbols via `libloading`), `live` (devices, live/offline handles, interface choice), `file` (built-in pcap reader/writer), `engine` (capture thread) |
 | `decode/` | etherparse (lax) for L2–L4; hand-written DNS, TLS SNI and HTTP parsers |
-| `analytics/` | `State` (hosts, names, protocols, bandwidth history), anomaly detectors, JSON snapshot |
+| `analytics/` | `State` (hosts, names, protocols, bandwidth history), anomaly detectors (`anomaly` kinds and categories, detectors in `state`), `text` (RU/EN alert texts shared with the desktop notifications), JSON snapshot |
 | `web/` | axum router, REST, WebSocket, graceful shutdown; `css` generates the utility stylesheet the page uses (a Tailwind subset — no CDN) |
 | `demo/` | scripted synthetic traffic that exercises every detector |
-| `procs/`, `geo/`, `trace/`, `netpath` | process attribution and code signatures, MaxMind DB reader, route tracing and watching, egress check |
+| `procs/`, `geo/`, `trace/`, `netpath` | process attribution and code signatures, MaxMind DB reader, route tracing and watching, default-route watcher and egress check |
 | `app`, `cli`, `main.rs` | wiring and the command-line program; `app::run_with` takes an external shutdown signal |
-| `src/bin/app/` | Windows desktop shell: program window hosting the dashboard (`webview.rs` — WebView2 through `WebView2Loader.dll`, COM declared by hand), tray icon, notifications, settings and log files, single instance |
+| `src/bin/app/` | Windows desktop shell: program window hosting the dashboard (`webview.rs` — WebView2 through `WebView2Loader.dll`, COM declared by hand), tray icon and menu, toast notifications (`toast.rs` — `Windows.UI.Notifications` through `combase.dll`, interfaces declared by hand; `icons.rs` — menu and toast icons drawn with GDI+ from the Segoe icon font), `netscope:` URL protocol, settings and log files, single instance |
 | `assets/index.html` | single-file dashboard (`include_str!`): written with Tailwind class names, styled by `web::css` |
 | `installer/netscope.iss` | Inno Setup script; `scripts/build-installer.ps1` builds `dist\NetScope-Setup-<version>.exe` |
 
@@ -227,14 +255,30 @@ and a machine without Npcap/libpcap gets an explanation instead of a crash
 
 ### Detectors
 
-| Alert | Severity | Trigger |
-|---|---|---|
-| Credentials over HTTP | high | unencrypted HTTP request containing `password`, tokens, API keys, `Authorization: Basic/Bearer`, card data… |
-| Suspicious DNS | medium / low | names > 100 chars, labels > 50 chars, high-entropy labels with digits (tunneling/exfiltration); TXT/NULL/ANY queries |
-| Volume spike | medium / high | an external host **with no DNS/SNI/Host name** exchanges > `--spike-mib` MiB (default 1) in one second and > 8× its usual rate |
-| Cleartext protocol | low | new FTP, Telnet, POP3, IMAP, rexec, rlogin connections |
+| Alert (`kind`) | Category | Severity | Trigger |
+|---|---|---|---|
+| Credentials over HTTP (`sensitive_http`) | security | high | unencrypted HTTP request containing `password`, tokens, API keys, `Authorization: Basic/Bearer`, card data… |
+| Suspicious DNS (`suspicious_dns`) | security | medium / low | names > 100 chars, labels > 50 chars, high-entropy labels with digits (tunneling/exfiltration); TXT/NULL/ANY queries |
+| Volume spike (`volume_spike`) | security | medium / high | an external host **with no DNS/SNI/Host name** exchanges > `--spike-mib` MiB (default 1) in one second and > 8× its usual rate |
+| Cleartext protocol (`cleartext_protocol`) | security | low | new FTP, Telnet, POP3, IMAP, rexec, rlogin connections |
+| Unsigned program (`unsigned_process`) | security | medium / high | a program with no or an invalid Authenticode signature uses the network; high when it runs from Temp/Downloads |
+| Suspicious connection (`suspicious_connection`) | security | medium / high | outbound TCP to 4444/1337/31337/5555 (high), RDP, VNC, SMB/NetBIOS/RPC on the internet, port 25 from a non-mail program, an unsigned program on a bare IP (`reason`: `remote_control`, `smb`, `mail`, `unsigned_ip`) |
+| Port scan (`port_scan`) | security | high (in) / medium (out) | 15 distinct ports of one host within 10 s (`direction`: `in` = a remote host probes us, `out` = a local program sweeps a host) |
+| Large upload (`large_upload`) | security | medium | 200 MiB sent to one external host within 10 minutes |
+| New program online (`new_process`) | novelty | low | a program's first connection after the learning period |
+| New destination (`new_destination`) | novelty | low | a program's first connection to a domain/provider |
+| New country (`new_country`) | novelty | medium | a program's first connection to a country |
+| New open port (`new_listener`) | novelty | medium | a program starts listening on a port reachable from the network |
+| Network change (`network_change`) | network | medium | the default route moved to another adapter (`vpn`: `on`/`off` when a tunnel adapter came or went) |
+| Internet exit changed (`egress_change`) | network | medium | the public address seen by cloudflare.com changed (`vpn` hint as above) |
+| New DNS resolver (`dns_resolver_change`) | network | medium | queries go to a resolver never seen before (after the first minute; not within 2 min of a network change) |
+| Capture stopped (`capture_failed`) | network | high | the live capture ended with an error |
+| Route change (`route_change`) | routes | medium | a watched route goes through other hops |
+| Latency increase (`latency_increase`) | routes | low | a watched route got markedly slower |
 
-Repeats of the same alert are suppressed for 60 s. Memory is bounded (4096 hosts LRU, 500 alerts, 5 min of history).
+Every alert carries its `category` (`security`, `novelty`, `network`, `routes`), which is what
+the desktop app's notification switches work on. Repeats of the same alert are suppressed for
+60 s. Memory is bounded (4096 hosts LRU, 500 alerts, 5 min of history).
 
 ## Build
 

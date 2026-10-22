@@ -19,7 +19,7 @@ use super::persist::{self, Persisted, WatchEntry};
 use crate::capture::engine::unix_now;
 use crate::decode::{linktype, App, PacketInfo, Proto, Transport};
 use crate::geo::GeoDb;
-use crate::netpath::Egress;
+use crate::netpath::{Egress, RouteInfo};
 use crate::procs::signature::{suspicious_location, SigStatus, Signature};
 use crate::procs::{OwnerIndex, ProcInfo, SockProto};
 use crate::trace::watch::{RouteEvent, RouteWatch};
@@ -40,6 +40,12 @@ pub struct Config {
     pub alert_capacity: usize,
     /// Connections kept in memory (least recently active evicted).
     pub max_flows: usize,
+    /// Distinct ports one host must probe within `scan_window_secs` to be a port scan.
+    pub scan_ports: usize,
+    pub scan_window_secs: i64,
+    /// Bytes sent to one external host within `upload_window_secs` that make a "large upload".
+    pub upload_min_bytes: u64,
+    pub upload_window_secs: i64,
 }
 
 impl Default for Config {
@@ -52,6 +58,10 @@ impl Default for Config {
             alert_suppress_secs: 60,
             alert_capacity: 500,
             max_flows: 4096,
+            scan_ports: 15,
+            scan_window_secs: 10,
+            upload_min_bytes: 200 << 20,
+            upload_window_secs: 600,
         }
     }
 }
@@ -137,6 +147,39 @@ pub struct Host {
     pub hops: Option<u8>,
     /// Best TCP handshake round trip to the host.
     pub rtt_us: Option<u32>,
+    /// Our ports this host sent SYNs to lately (inbound port-scan detection).
+    probe_in: PortWindow,
+    /// Its ports we sent SYNs to lately (outbound port-scan detection).
+    probe_out: PortWindow,
+    /// Bytes sent to the host since `up_since` (large-upload detection).
+    up_bytes: u64,
+    up_since: i64,
+}
+
+/// Distinct ports seen within a time window.
+#[derive(Debug, Clone, Default)]
+struct PortWindow {
+    ports: BTreeSet<u16>,
+    since: i64,
+}
+
+impl PortWindow {
+    /// Adds `port` at `now`, restarting the window when `window_secs` have passed; returns
+    /// the number of distinct ports in the window.
+    fn observe(&mut self, port: u16, now: i64, window_secs: i64) -> usize {
+        if self.ports.is_empty() || now - self.since > window_secs {
+            self.ports.clear();
+            self.since = now;
+        }
+        if self.ports.len() < 1024 {
+            self.ports.insert(port);
+        }
+        self.ports.len()
+    }
+
+    fn reset(&mut self) {
+        self.ports.clear();
+    }
 }
 
 impl Host {
@@ -155,6 +198,10 @@ impl Host {
             flagged: false,
             hops: None,
             rtt_us: None,
+            probe_in: PortWindow::default(),
+            probe_out: PortWindow::default(),
+            up_bytes: 0,
+            up_since: ts,
         }
     }
 
@@ -212,7 +259,30 @@ pub struct State {
     /// Connections seen closed, `(close time Вµs, id)` in order: journaled by `advance` once
     /// `CLOSE_GRACE_US` has passed, so a late process attribution still lands in the record.
     close_queue: VecDeque<(i64, u64)>,
+    /// DNS servers queries were sent to (bounded); a new one after the learning period is news.
+    dns_resolvers: HashSet<IpAddr>,
+    last_resolver: Option<IpAddr>,
+    /// The adapter carrying the default route, as last reported by the network watcher.
+    route: Option<RouteInfo>,
+    /// Wall-clock time of the last default-route change (resolver changes right after it
+    /// are part of the same event).
+    last_network_change: i64,
+    /// The last successful egress check and whether a tunnel adapter carried the route
+    /// then (failed checks in between do not reset the comparison).
+    last_egress: Option<(Egress, bool)>,
+    /// New outbound connections to bare IPs, `(deadline Вµs, id)`: judged once a name had
+    /// time to show up (SNI, Host) — see `check_unnamed_connections`.
+    ip_checks: VecDeque<(i64, u64)>,
 }
+
+/// A connection to a bare IP gets this long for a name (SNI/Host) to show up before an
+/// unsigned program using it is reported.
+const IP_CHECK_GRACE_US: i64 = 3_000_000;
+/// Resolver changes are not reported this long after a network change.
+const RESOLVER_QUIET_SECS: i64 = 120;
+/// Nothing is learned about resolvers during the first minute (baseline).
+const RESOLVER_LEARNING_SECS: i64 = 60;
+const MAX_RESOLVERS: usize = 64;
 
 /// A closed connection waits this long (traffic clock) before it is journaled.
 pub const CLOSE_GRACE_US: i64 = 5_000_000;
@@ -250,6 +320,12 @@ impl State {
             alerts,
             journal: None,
             close_queue: VecDeque::new(),
+            dns_resolvers: HashSet::new(),
+            last_resolver: None,
+            route: None,
+            last_network_change: 0,
+            last_egress: None,
+            ip_checks: VecDeque::new(),
         }
     }
 
@@ -369,6 +445,19 @@ impl State {
     }
 
     pub fn set_status(&mut self, status: CaptureStatus) {
+        if let CaptureStatus::Failed(e) = &status {
+            if self.capture.status != status {
+                self.alert_at(unix_now(), NewAlert {
+                    severity: Severity::High,
+                    kind: AlertKind::CaptureFailed,
+                    host: None,
+                    name: None,
+                    message: format!("Traffic capture stopped: {e}"),
+                    details: details([("error", e.clone())]),
+                    key: "capture-failed".into(),
+                });
+            }
+        }
         self.capture.status = status;
     }
 
@@ -425,6 +514,7 @@ impl State {
         self.now = sec;
         self.evict();
         self.journal_due_closes();
+        self.check_unnamed_connections();
     }
 
     /// End of input (capture file finished): closes the last second so its spike checks run.
@@ -497,6 +587,10 @@ impl State {
         host.sec_bytes += len;
 
         let o = self.track_flow(ts_us, wire_len, frame, info, outbound);
+        self.watch_probes_and_uploads(sec, len, info, remote, remote_port, outbound, o.id);
+        if o.created && outbound && matches!(info.transport, Transport::Tcp { syn: true, ack: false, .. }) && is_external(&remote) {
+            self.ip_checks.push_back((ts_us + IP_CHECK_GRACE_US, o.id));
+        }
         // A closed connection is journaled by `advance` after a grace period, so the process
         // found by the next socket-table poll is still part of the record.
         if o.closed {
@@ -512,6 +606,7 @@ impl State {
         }
         if o.process.is_some() && (o.created || o.named) {
             self.check_novelty(o.id);
+            self.check_suspicious(o.id);
         }
         let requester = self.flows.get(o.id).and_then(|f| f.process.as_ref()).map(|p| Requester { pid: p.pid, name: p.name.clone() });
         self.inspect(ts_us, info, remote, remote_port, requester);
@@ -584,6 +679,7 @@ impl State {
             s.first_us = s.first_us.min(a.first_us);
             s.last_us = s.last_us.max(a.last_us);
             self.check_novelty(a.id);
+            self.check_suspicious(a.id);
         }
         // Programs that start listening on ports reachable from the network. A failed or
         // empty socket table must not become the baseline: everything would be "new" later.
@@ -764,8 +860,270 @@ impl State {
         v
     }
 
+    /// Stores an egress check; a changed public address (after a successful earlier check)
+    /// is reported, with a VPN hint from the default route's adapter.
     pub fn set_egress(&mut self, r: Result<Egress, String>) {
+        let tunnel = self.route.as_ref().is_some_and(|x| x.tunnel);
+        if let (Some((prev, prev_tunnel)), Ok(next)) = (&self.last_egress, &r) {
+            if prev.ip != next.ip {
+                let label = |e: &Egress| match &e.loc {
+                    Some(cc) => format!("{} ({cc})", e.ip),
+                    None => e.ip.clone(),
+                };
+                let vpn = match (*prev_tunnel, tunnel) {
+                    (false, true) => "on",
+                    (true, false) => "off",
+                    _ => "",
+                };
+                let (before, after) = (label(prev), label(next));
+                self.alert_at(unix_now(), NewAlert {
+                    severity: Severity::Medium,
+                    kind: AlertKind::EgressChange,
+                    host: None,
+                    name: None,
+                    message: match vpn {
+                        "on" => format!("VPN is on: the internet exit is now {after} (was {before})"),
+                        "off" => format!("VPN is off: the internet exit is {after} again (was {before})"),
+                        _ => format!("The internet exit changed: {before} -> {after}"),
+                    },
+                    details: details([
+                        ("before", before),
+                        ("after", after),
+                        ("before_ip", prev.ip.clone()),
+                        ("after_ip", next.ip.clone()),
+                        ("before_country", prev.loc.clone().unwrap_or_default()),
+                        ("after_country", next.loc.clone().unwrap_or_default()),
+                        ("vpn", vpn.into()),
+                    ]),
+                    key: format!("egress:{}", next.ip),
+                });
+            }
+        }
+        if let Ok(e) = &r {
+            self.last_egress = Some((e.clone(), tunnel));
+        }
         self.egress = Some(r);
+    }
+
+    /// The default route moved (or went away). A change from one known adapter to another
+    /// is reported, with a VPN hint when a tunnel adapter came or went.
+    pub fn set_default_route(&mut self, route: Option<RouteInfo>) {
+        let now = unix_now();
+        if let (Some(prev), Some(next)) = (&self.route, &route) {
+            if prev != next {
+                let vpn = match (prev.tunnel, next.tunnel) {
+                    (false, true) => "on",
+                    (true, false) => "off",
+                    _ => "",
+                };
+                let (before, after) = (prev.label(), next.label());
+                self.last_network_change = now;
+                self.alert_at(now, NewAlert {
+                    severity: Severity::Medium,
+                    kind: AlertKind::NetworkChange,
+                    host: None,
+                    name: None,
+                    message: match vpn {
+                        "on" => format!("Traffic now goes through the VPN adapter {after} (was {before})"),
+                        "off" => format!("The VPN adapter {before} is no longer used; traffic goes through {after}"),
+                        _ => format!("Network changed: traffic goes through {after} (was {before})"),
+                    },
+                    details: details([
+                        ("before", before),
+                        ("after", after),
+                        ("before_ip", prev.ip.to_string()),
+                        ("after_ip", next.ip.to_string()),
+                        ("vpn", vpn.into()),
+                    ]),
+                    key: format!("net:{}", next.ip),
+                });
+            }
+        }
+        self.route = route;
+    }
+
+    pub fn default_route(&self) -> Option<&RouteInfo> {
+        self.route.as_ref()
+    }
+
+    /// A DNS query went to `resolver`: after the learning period, a server never seen before
+    /// is reported (unless the network just changed — that alert covers it).
+    fn note_resolver(&mut self, resolver: IpAddr) {
+        let known = self.dns_resolvers.contains(&resolver);
+        let before = self.last_resolver;
+        self.last_resolver = Some(resolver);
+        if known {
+            return;
+        }
+        if self.dns_resolvers.len() >= MAX_RESOLVERS {
+            return;
+        }
+        self.dns_resolvers.insert(resolver);
+        let learning = self.first_ts.is_none_or(|f| self.now - f < RESOLVER_LEARNING_SECS);
+        let after_network_change = unix_now() - self.last_network_change < RESOLVER_QUIET_SECS;
+        let Some(before) = before.filter(|_| !learning && !after_network_change) else { return };
+        self.alert(NewAlert {
+            severity: Severity::Medium,
+            kind: AlertKind::DnsResolverChange,
+            host: Some(resolver.to_string()),
+            name: None,
+            message: format!("DNS queries now go to a new server {resolver} (before: {before})"),
+            details: details([("before", before.to_string()), ("after", resolver.to_string())]),
+            key: format!("resolver:{resolver}"),
+        });
+    }
+
+    /// Port scans (many distinct ports of one host within a short window, either way) and
+    /// large uploads (many bytes to one external host within the upload window).
+    #[allow(clippy::too_many_arguments)]
+    fn watch_probes_and_uploads(&mut self, sec: i64, len: u64, info: &PacketInfo, remote: IpAddr, remote_port: u16, outbound: bool, flow_id: u64) {
+        let syn = matches!(info.transport, Transport::Tcp { syn: true, ack: false, .. });
+        let (scan_ports, window, up_min, up_window) = (self.cfg.scan_ports, self.cfg.scan_window_secs, self.cfg.upload_min_bytes, self.cfg.upload_window_secs);
+        let process = || self.flows.get(flow_id).and_then(|f| f.process.as_ref()).map(|p| p.name.clone());
+        let Some(h) = self.hosts.get_mut(&remote) else { return };
+        if syn && !outbound {
+            let n = h.probe_in.observe(info.dst_port, sec, window);
+            if n >= scan_ports {
+                let seconds = (sec - h.probe_in.since).max(1);
+                h.probe_in.reset();
+                h.flagged = true;
+                self.alert(NewAlert {
+                    severity: Severity::High,
+                    kind: AlertKind::PortScan,
+                    host: Some(remote.to_string()),
+                    name: None,
+                    message: format!("Port scan from {remote}: {n} ports in {seconds} s"),
+                    details: details([("direction", "in".into()), ("ports", n.to_string()), ("seconds", seconds.to_string())]),
+                    key: format!("scan-in:{remote}"),
+                });
+            }
+            return;
+        }
+        if syn && outbound {
+            let n = h.probe_out.observe(remote_port, sec, window);
+            if n >= scan_ports {
+                let seconds = (sec - h.probe_out.since).max(1);
+                h.probe_out.reset();
+                let process = process().unwrap_or_else(|| "?".into());
+                self.alert(NewAlert {
+                    severity: Severity::Medium,
+                    kind: AlertKind::PortScan,
+                    host: Some(remote.to_string()),
+                    name: None,
+                    message: format!("{process} scans ports of {remote}: {n} ports in {seconds} s"),
+                    details: details([("direction", "out".into()), ("process", process), ("ports", n.to_string()), ("seconds", seconds.to_string())]),
+                    key: format!("scan-out:{remote}"),
+                });
+            }
+            return;
+        }
+        if outbound && is_external(&remote) {
+            if sec - h.up_since > up_window {
+                h.up_since = sec;
+                h.up_bytes = 0;
+            }
+            h.up_bytes += len;
+            if h.up_bytes >= up_min {
+                let bytes = h.up_bytes;
+                let minutes = ((sec - h.up_since).max(1) + 59) / 60;
+                h.up_since = sec;
+                h.up_bytes = 0;
+                let destination = self.names.get(&remote).map_or_else(|| remote.to_string(), |n| n.name.clone());
+                let process = process().unwrap_or_else(|| "?".into());
+                self.alert(NewAlert {
+                    severity: Severity::Medium,
+                    kind: AlertKind::LargeUpload,
+                    host: Some(remote.to_string()),
+                    name: self.names.get(&remote).map(|n| n.name.clone()),
+                    message: format!("{process} sent {bytes} bytes to {destination} in {minutes} min"),
+                    details: details([("process", process), ("destination", destination), ("bytes", bytes.to_string()), ("minutes", minutes.to_string())]),
+                    key: format!("upload:{remote}"),
+                });
+            }
+        }
+    }
+
+    /// Outbound connections that look wrong by their port: remote-control/malware ports,
+    /// SMB to the internet, direct SMTP from something that is not a mail program.
+    fn check_suspicious(&mut self, flow_id: u64) {
+        let Some(f) = self.flows.get(flow_id) else { return };
+        let Some(p) = &f.process else { return };
+        if p.pid == std::process::id() || f.key.l4 != L4::Tcp || f.initiated_locally != Some(true) {
+            return;
+        }
+        let remote = f.key.remote;
+        if !is_external(&remote.ip()) {
+            return;
+        }
+        let process = p.name.clone();
+        let port = remote.port();
+        let Some((reason, service, severity)) = suspicious_port(port, &process) else { return };
+        let endpoint = remote.to_string();
+        self.alert(NewAlert {
+            severity,
+            kind: AlertKind::SuspiciousConnection,
+            host: Some(remote.ip().to_string()),
+            name: f.name.clone(),
+            message: match reason {
+                "remote_control" => format!("{process} connects to {endpoint}: port {port} is typical of remote control and malware ({service})"),
+                "smb" => format!("{process} opens {service} file sharing to {endpoint} on the internet"),
+                _ => format!("{process} sends mail directly to {endpoint} (SMTP)"),
+            },
+            details: details([
+                ("process", process.clone()),
+                ("endpoint", endpoint),
+                ("port", port.to_string()),
+                ("reason", reason.into()),
+                ("service", service.into()),
+            ]),
+            key: format!("susp:{reason}:{process}:{remote}"),
+        });
+    }
+
+    /// Connections to bare IPs whose grace period is over: an unsigned (or badly signed)
+    /// program talking to an address with no DNS/SNI/Host name on an uncommon port.
+    fn check_unnamed_connections(&mut self) {
+        let now_us = self.now.saturating_mul(1_000_000);
+        while let Some(&(deadline, id)) = self.ip_checks.front() {
+            if deadline > now_us {
+                break;
+            }
+            self.ip_checks.pop_front();
+            let Some(f) = self.flows.get(id) else { continue };
+            let Some(p) = f.process.clone() else { continue };
+            let remote = f.key.remote;
+            if p.pid == std::process::id() || f.name.is_some() || self.names.contains_key(&remote.ip()) || !is_external(&remote.ip()) {
+                continue;
+            }
+            // Common ports are fine; ports the other rule reports are reported there.
+            if matches!(remote.port(), 80 | 443 | 853 | 53 | 123 | 22 | 21 | 990 | 993 | 995 | 1194 | 51820 | 500 | 4500 | 8080 | 8443)
+                || suspicious_port(remote.port(), &p.name).is_some()
+            {
+                continue;
+            }
+            if !self.signature_for(&p).is_some_and(|s| matches!(s.status, SigStatus::Unsigned | SigStatus::Invalid)) {
+                continue;
+            }
+            let endpoint = remote.to_string();
+            self.alert(NewAlert {
+                severity: Severity::Medium,
+                kind: AlertKind::SuspiciousConnection,
+                host: Some(remote.ip().to_string()),
+                name: None,
+                message: format!("Unsigned program {} connects to {endpoint} by IP without a domain name", p.name),
+                details: details([
+                    ("process", p.name.clone()),
+                    ("endpoint", endpoint),
+                    ("port", remote.port().to_string()),
+                    ("reason", "unsigned_ip".into()),
+                    ("path", p.path.clone().unwrap_or_default()),
+                ]),
+                key: format!("susp:unsigned_ip:{}:{}", p.name, remote.ip()),
+            });
+        }
+        if self.ip_checks.len() > 10_000 {
+            self.ip_checks.drain(..5_000);
+        }
     }
 
     /// A new connection could not be attributed yet.
@@ -841,6 +1199,9 @@ impl State {
                 }
             }
             App::Dns(m) => {
+                if !remote.is_multicast() && !matches!(remote_port, 5353 | 5355) && !m.questions.is_empty() {
+                    self.note_resolver(remote);
+                }
                 for q in &m.questions {
                     if self.dns_queries.len() < MAX_DNS_NAMES || self.dns_queries.contains_key(&q.name) {
                         *self.dns_queries.entry(q.name.clone()).or_default() += 1;
@@ -1000,6 +1361,33 @@ pub fn estimate_hops(ttl: u8) -> u8 {
         _ => 255 - ttl,
     }
 }
+/// `(reason, service, severity)` when an outbound connection to `port` by `process` is
+/// suspicious by the port alone.
+fn suspicious_port(port: u16, process: &str) -> Option<(&'static str, &'static str, Severity)> {
+    Some(match port {
+        4444 => ("remote_control", "Metasploit", Severity::High),
+        1337 | 31337 => ("remote_control", "backdoor", Severity::High),
+        5555 => ("remote_control", "ADB", Severity::High),
+        3389 => ("remote_control", "RDP", Severity::Medium),
+        5900..=5903 => ("remote_control", "VNC", Severity::Medium),
+        445 => ("smb", "SMB", Severity::Medium),
+        139 => ("smb", "NetBIOS", Severity::Medium),
+        135 => ("smb", "RPC", Severity::Medium),
+        25 if !is_mail_program(process) => ("mail", "SMTP", Severity::Medium),
+        _ => return None,
+    })
+}
+
+/// Programs expected to talk SMTP (port 25) themselves.
+fn is_mail_program(name: &str) -> bool {
+    const MAIL: &[&str] = &[
+        "outlook", "thunderbird", "betterbird", "mail", "postbox", "mailbird", "emclient", "em client", "evolution", "kmail", "sendmail",
+        "postfix", "exim", "msmtp", "hmailserver", "mailenable", "smtp",
+    ];
+    let n = name.to_lowercase();
+    MAIL.iter().any(|k| n.contains(k))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1156,6 +1544,225 @@ mod tests {
         let kinds: Vec<AlertKind> = s.alerts.recent(10).iter().map(|a| a.kind).collect();
         assert_eq!(kinds, vec![AlertKind::CleartextProtocol, AlertKind::SuspiciousDns]);
         assert_eq!(s.dns_queries.get("x7k2p9q4m1v8b3n6c5z0w1.exfil.example"), Some(&1));
+    }
+
+    fn syn(src: &str, dst: &str, sport: u16, dport: u16) -> PacketInfo {
+        let mut p = pkt(src, dst, sport, dport, Proto::Tcp, App::None);
+        p.transport = Transport::TCP_SYN;
+        p
+    }
+
+    fn owners(sockets: Vec<(SockProto, &str, Option<&str>, u32)>, procs: Vec<(u32, &str, Option<&str>)>) -> Arc<OwnerIndex> {
+        use crate::procs::{OsSnapshot, SocketEntry};
+        let procs = procs
+            .into_iter()
+            .map(|(pid, name, path)| (pid, ProcInfo { pid, name: name.into(), path: path.map(String::from), parent: None }))
+            .collect();
+        let sockets = sockets
+            .into_iter()
+            .map(|(proto, local, remote, pid)| SocketEntry {
+                proto,
+                local: local.parse().unwrap(),
+                remote: remote.map(|r| r.parse().unwrap()),
+                state: (proto == SockProto::Tcp).then_some("ESTABLISHED"),
+                pid,
+            })
+            .collect();
+        Arc::new(OwnerIndex::new(OsSnapshot { sockets, procs, error: None }))
+    }
+
+    #[test]
+    fn inbound_and_outbound_port_scans() {
+        let mut s = state();
+        for port in 1..=14 {
+            s.record(us(T0), 60, Some(&syn("192.168.1.66", ME, 40000 + port, port)));
+        }
+        assert!(s.alerts.recent(10).is_empty(), "14 ports are below the threshold");
+        s.record(us(T0) + 500_000, 60, Some(&syn("192.168.1.66", ME, 40015, 15)));
+        let a = s.alerts.recent(10);
+        assert_eq!(a.len(), 1, "{a:?}");
+        assert_eq!((a[0].kind, a[0].severity, a[0].host.as_deref()), (AlertKind::PortScan, Severity::High, Some("192.168.1.66")));
+        assert_eq!((a[0].details["direction"].as_str(), a[0].details["ports"].as_str(), a[0].details["seconds"].as_str()), ("in", "15", "1"));
+        // The window restarts: the same host must probe 15 more ports for another alert.
+        for port in 100..=114 {
+            s.record(us(T0) + 600_000, 60, Some(&syn("192.168.1.66", ME, 41000 + port, port)));
+        }
+        assert_eq!(s.alerts.recent(10).len(), 1, "a repeat within the suppression window is dropped");
+
+        // Outbound: a program sweeping a host. Ports probed 20 s apart do not add up.
+        let mut s = state();
+        for port in 1..=14 {
+            s.record(us(T0 + 20 * i64::from(port)), 60, Some(&syn(ME, "203.0.113.5", 50000 + port, port)));
+        }
+        assert!(s.alerts.recent(10).is_empty());
+        for port in 1..=15 {
+            s.record(us(T0 + 1000), 60, Some(&syn(ME, "203.0.113.5", 51000 + port, 8000 + port)));
+        }
+        let a = s.alerts.recent(10);
+        assert_eq!(a.len(), 1, "{a:?}");
+        assert_eq!((a[0].kind, a[0].severity, a[0].details["direction"].as_str(), a[0].details["process"].as_str()), (AlertKind::PortScan, Severity::Medium, "out", "?"));
+        // Ordinary browsing: many connections to the same two ports are not a scan.
+        let mut s = state();
+        for i in 0..40u16 {
+            s.record(us(T0), 60, Some(&syn(ME, "203.0.113.5", 52000 + i, if i % 2 == 0 { 80 } else { 443 })));
+        }
+        assert!(s.alerts.recent(10).is_empty());
+    }
+
+    #[test]
+    fn large_upload_to_one_host() {
+        let cfg = Config { upload_min_bytes: 10_000, upload_window_secs: 600, ..Config::default() };
+        let mut s = State::new(cfg, [ip(ME)].into_iter().collect(), state().capture);
+        s.names.insert(ip("203.0.113.9"), Named { name: "drop.example".into(), source: NameSource::Sni });
+        s.set_owners(owners(vec![(SockProto::Tcp, "192.168.1.50:5000", Some("203.0.113.9:443"), 9)], vec![(9, "sync.exe", None)]));
+        for i in 0..6 {
+            s.record(us(T0 + i * 30), 1400, Some(&pkt(ME, "203.0.113.9", 5000, 443, Proto::Tls, App::None)));
+            // Downloads do not count.
+            s.record(us(T0 + i * 30), 1400, Some(&pkt("203.0.113.9", ME, 443, 5000, Proto::Tls, App::None)));
+        }
+        assert!(s.alerts.recent(10).is_empty(), "8400 bytes sent");
+        s.record(us(T0 + 180), 1400, Some(&pkt(ME, "203.0.113.9", 5000, 443, Proto::Tls, App::None)));
+        s.record(us(T0 + 180), 1400, Some(&pkt(ME, "203.0.113.9", 5000, 443, Proto::Tls, App::None)));
+        let a = s.alerts.recent(10);
+        assert_eq!(a.len(), 1, "{a:?}");
+        assert_eq!((a[0].kind, a[0].host.as_deref(), a[0].name.as_deref()), (AlertKind::LargeUpload, Some("203.0.113.9"), Some("drop.example")));
+        assert_eq!((a[0].details["process"].as_str(), a[0].details["destination"].as_str(), a[0].details["bytes"].as_str(), a[0].details["minutes"].as_str()), ("sync.exe", "drop.example", "11200", "3"));
+        // LAN transfers are not uploads to the internet.
+        for _ in 0..20 {
+            s.record(us(T0 + 181), 1400, Some(&pkt(ME, "192.168.1.9", 5001, 445, Proto::Tcp, App::None)));
+        }
+        assert_eq!(s.alerts.recent(10).len(), 1);
+    }
+
+    #[test]
+    fn resolver_changes_after_learning_unless_the_network_just_changed() {
+        let mut s = state();
+        let query = |name: &str| App::Dns(dns::parse(&dns::build_query(1, name, dns::TYPE_A)).unwrap());
+        s.record(us(T0), 80, Some(&pkt(ME, "192.168.1.1", 5000, 53, Proto::Dns, query("a.example"))));
+        s.record(us(T0 + 10), 80, Some(&pkt(ME, "192.168.1.2", 5000, 53, Proto::Dns, query("a.example"))));
+        s.record(us(T0 + 30), 80, Some(&pkt(ME, "224.0.0.251", 5353, 5353, Proto::Dns, query("tv.local"))));
+        assert!(s.alerts.recent(10).is_empty(), "two resolvers in the first minute are the baseline; mDNS never counts");
+        s.record(us(T0 + 61), 80, Some(&pkt(ME, "192.168.1.1", 5000, 53, Proto::Dns, query("b.example"))));
+        s.record(us(T0 + 62), 80, Some(&pkt(ME, "8.8.8.8", 5000, 53, Proto::Dns, query("b.example"))));
+        let a = s.alerts.recent(10);
+        assert_eq!(a.len(), 1, "{a:?}");
+        assert_eq!((a[0].kind, a[0].host.as_deref(), a[0].details["before"].as_str(), a[0].details["after"].as_str()), (AlertKind::DnsResolverChange, Some("8.8.8.8"), "192.168.1.1", "8.8.8.8"));
+        s.record(us(T0 + 63), 80, Some(&pkt(ME, "8.8.8.8", 5000, 53, Proto::Dns, query("c.example"))));
+        assert_eq!(s.alerts.recent(10).len(), 1, "a known resolver is not news");
+        // Right after the network changed, a new resolver is part of that event.
+        let home = RouteInfo { ip: ip("192.168.1.50"), adapter: Some("Wi-Fi".into()), tunnel: false };
+        let vpn = RouteInfo { ip: ip("10.8.0.2"), adapter: Some("WireGuard".into()), tunnel: true };
+        s.set_default_route(Some(home.clone()));
+        s.set_default_route(Some(vpn));
+        assert_eq!(s.alerts.recent(10)[0].kind, AlertKind::NetworkChange);
+        s.record(us(T0 + 70), 80, Some(&pkt(ME, "10.8.0.1", 5000, 53, Proto::Dns, query("d.example"))));
+        assert_eq!(s.alerts.recent(10).len(), 2, "no resolver alert within the quiet period");
+        assert_eq!(s.default_route().map(|r| r.tunnel), Some(true));
+    }
+
+    #[test]
+    fn network_and_egress_changes_with_vpn_hints() {
+        let mut s = state();
+        let home = RouteInfo { ip: ip("192.168.1.50"), adapter: Some("Wi-Fi".into()), tunnel: false };
+        let vpn = RouteInfo { ip: ip("10.8.0.2"), adapter: Some("WireGuard Tunnel".into()), tunnel: true };
+        let eg = |ip: &str, loc: &str| Egress { ip: ip.into(), colo: None, loc: Some(loc.into()), geo: None, checked_at: 0 };
+        s.set_default_route(Some(home.clone()));
+        s.set_egress(Ok(eg("203.0.113.1", "RU")));
+        s.set_egress(Ok(eg("203.0.113.1", "RU")));
+        s.set_egress(Err("timeout".into()));
+        assert!(s.alerts.recent(10).is_empty(), "the first route, an unchanged address and a failed check are not news");
+        s.set_default_route(Some(vpn.clone()));
+        s.set_egress(Ok(eg("198.51.100.7", "NL")));
+        let a = s.alerts.recent(10);
+        assert_eq!(a.iter().map(|a| a.kind).collect::<Vec<_>>(), vec![AlertKind::EgressChange, AlertKind::NetworkChange]);
+        let net = &a[1];
+        assert_eq!((net.details["before"].as_str(), net.details["after"].as_str(), net.details["vpn"].as_str()), ("Wi-Fi", "WireGuard Tunnel", "on"));
+        let eg_a = &a[0];
+        assert_eq!((eg_a.details["before"].as_str(), eg_a.details["after"].as_str(), eg_a.details["vpn"].as_str()), ("203.0.113.1 (RU)", "198.51.100.7 (NL)", "on"));
+        assert_eq!(eg_a.details["after_country"], "NL");
+        // Back home: the VPN is off.
+        s.set_default_route(Some(home));
+        s.set_egress(Ok(eg("203.0.113.1", "RU")));
+        let a = s.alerts.recent(10);
+        assert_eq!(a.len(), 4);
+        assert_eq!((a[0].kind, a[0].details["vpn"].as_str()), (AlertKind::EgressChange, "off"));
+        assert_eq!((a[1].kind, a[1].details["vpn"].as_str()), (AlertKind::NetworkChange, "off"));
+        // Losing the route is not reported; the next route after that is compared to nothing.
+        s.set_default_route(None);
+        s.set_default_route(Some(RouteInfo { ip: ip("172.16.0.5"), adapter: None, tunnel: false }));
+        assert_eq!(s.alerts.recent(10).len(), 4);
+        assert_eq!(s.default_route().unwrap().label(), "172.16.0.5");
+    }
+
+    #[test]
+    fn suspicious_connections_by_port_and_unsigned_programs_on_bare_ips() {
+        let mut s = state();
+        // Attribution arrives with the socket table: the check runs then.
+        s.record(us(T0), 60, Some(&syn(ME, "203.0.113.9", 5002, 4444)));
+        s.record(us(T0), 60, Some(&syn(ME, "203.0.113.9", 5003, 25)));
+        s.record(us(T0), 60, Some(&syn(ME, "203.0.113.9", 5004, 25)));
+        s.record(us(T0), 60, Some(&syn(ME, "203.0.113.9", 5005, 445)));
+        s.record(us(T0), 60, Some(&syn(ME, "192.168.1.9", 5006, 445)));
+        s.record(us(T0), 60, Some(&syn(ME, "203.0.113.9", 5007, 9999)));
+        s.record(us(T0), 60, Some(&syn(ME, "203.0.113.9", 5008, 9999)));
+        assert!(s.alerts.recent(10).is_empty());
+        s.set_owners(owners(
+            vec![
+                (SockProto::Tcp, "192.168.1.50:5002", Some("203.0.113.9:4444"), 11),
+                (SockProto::Tcp, "192.168.1.50:5003", Some("203.0.113.9:25"), 12),
+                (SockProto::Tcp, "192.168.1.50:5004", Some("203.0.113.9:25"), 13),
+                (SockProto::Tcp, "192.168.1.50:5005", Some("203.0.113.9:445"), 11),
+                (SockProto::Tcp, "192.168.1.50:5006", Some("192.168.1.9:445"), 11),
+                (SockProto::Tcp, "192.168.1.50:5007", Some("203.0.113.9:9999"), 14),
+                (SockProto::Tcp, "192.168.1.50:5008", Some("203.0.113.9:9999"), 11),
+            ],
+            vec![
+                (11, "dropper.exe", Some(r"C:\Users\x\AppData\Local\Temp\dropper.exe")),
+                (12, "thunderbird.exe", Some(r"C:\Program Files\Mozilla Thunderbird\thunderbird.exe")),
+                (13, "svc.exe", Some(r"C:\tools\svc.exe")),
+                (14, "good.exe", Some(r"C:\Program Files\Good\good.exe")),
+            ],
+        ));
+        let a = s.alerts.recent(10);
+        let mut reasons: Vec<(String, String, Severity)> = a.iter().map(|x| (x.details["reason"].clone(), x.details["process"].clone(), x.severity)).collect();
+        reasons.sort();
+        assert_eq!(
+            reasons,
+            vec![
+                ("mail".to_string(), "svc.exe".to_string(), Severity::Medium),
+                ("remote_control".to_string(), "dropper.exe".to_string(), Severity::High),
+                ("smb".to_string(), "dropper.exe".to_string(), Severity::Medium),
+            ],
+            "{a:?}"
+        );
+        assert!(a.iter().all(|x| x.kind == AlertKind::SuspiciousConnection && x.host.as_deref() == Some("203.0.113.9")));
+        assert_eq!(a.iter().find(|x| x.details["reason"] == "remote_control").unwrap().details["service"], "Metasploit");
+
+        // Bare-IP rule: only unsigned programs, only after the grace period, only without a name.
+        let mut sigs = HashMap::new();
+        sigs.insert(r"C:\Users\x\AppData\Local\Temp\dropper.exe".to_string(), Signature { status: SigStatus::Unsigned, signer: None });
+        sigs.insert(r"C:\Program Files\Good\good.exe".to_string(), Signature { status: SigStatus::Signed, signer: Some("Good Inc".into()) });
+        s.set_signatures(sigs);
+        let before = s.alerts.recent(20).len();
+        s.advance(T0 + 2);
+        assert_eq!(s.alerts.recent(20).len(), before, "nothing before the grace period");
+        s.advance(T0 + 4);
+        let a = s.alerts.recent(20);
+        let unnamed: Vec<&super::super::Alert> = a.iter().filter(|x| x.details.get("reason").is_some_and(|r| r == "unsigned_ip")).collect();
+        assert_eq!(unnamed.len(), 1, "{a:?}");
+        assert_eq!((unnamed[0].details["process"].as_str(), unnamed[0].details["endpoint"].as_str()), ("dropper.exe", "203.0.113.9:9999"));
+    }
+
+    #[test]
+    fn a_failed_capture_is_an_alert_once() {
+        let mut s = state();
+        s.set_status(CaptureStatus::Failed("adapter gone".into()));
+        s.set_status(CaptureStatus::Failed("adapter gone".into()));
+        let a = s.alerts.recent(10);
+        assert_eq!(a.len(), 1);
+        assert_eq!((a[0].kind, a[0].severity, a[0].details["error"].as_str()), (AlertKind::CaptureFailed, Severity::High, "adapter gone"));
+        s.set_status(CaptureStatus::Finished);
+        assert_eq!(s.alerts.recent(10).len(), 1);
     }
 
     #[test]

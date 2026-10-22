@@ -766,7 +766,8 @@ async fn settings_page_round_trip_validation_and_restart() {
     assert_eq!(v["file"], ini.display().to_string());
     let defaults = serde_json::json!({
         "port": null, "host": "127.0.0.1", "interface": null, "filter": null, "geoip": null,
-        "egress_check": true, "promiscuous": true, "verbose": false, "show_window": true, "notifications": "medium", "journal_days": 1
+        "egress_check": true, "promiscuous": true, "verbose": false, "show_window": true, "notifications": "medium",
+        "notify_categories": ["security", "novelty", "network", "routes"], "notify_snooze_until": 0, "journal_days": 1
     });
     assert_eq!(v["values"], defaults);
     assert_eq!(v["journal"], serde_json::json!({ "dir": journal_dir.display().to_string(), "days": 1, "enabled": true }));
@@ -779,11 +780,11 @@ async fn settings_page_round_trip_validation_and_restart() {
     assert!(!ini.exists(), "GET does not create the file");
 
     // Save: the file appears (with its directory), autostart reaches the host.
-    let (st, r) = post_json(addr, "/api/settings", r#"{"port": 9000, "host": " 0.0.0.0 ", "interface": " Wi-Fi ", "notifications": "OFF", "autostart": true}"#).await;
+    let (st, r) = post_json(addr, "/api/settings", r#"{"port": 9000, "host": " 0.0.0.0 ", "interface": " Wi-Fi ", "notifications": "OFF", "notify_categories": ["routes", "security", "routes"], "notify_snooze_until": 1760000000, "autostart": true}"#).await;
     assert_eq!((st, &r), (200, &serde_json::json!({ "saved": true, "restart_required": true })));
     assert!(*host.autostart.lock().unwrap());
     let text = std::fs::read_to_string(&ini).unwrap();
-    for line in ["port=9000\r\n", "host=0.0.0.0\r\n", "interface=Wi-Fi\r\n", "notifications=off\r\n"] {
+    for line in ["port=9000\r\n", "host=0.0.0.0\r\n", "interface=Wi-Fi\r\n", "notifications=off\r\n", "notify_categories=security,routes\r\n", "notify_snooze_until=1760000000\r\n"] {
         assert!(text.contains(line), "{line:?} in {text:?}");
     }
     let (_, body) = get(addr, "/api/settings").await;
@@ -833,6 +834,8 @@ async fn settings_page_round_trip_validation_and_restart() {
         (r#"{"host": "example.org"}"#, "host"),
         (r#"{"host": "127.0.0.1:80"}"#, "host"),
         (r#"{"notifications": "loud"}"#, "notifications"),
+        (r#"{"notify_categories": ["security", "everything"]}"#, "everything"),
+        (r#"{"notify_categories": "security"}"#, "notify_categories"),
         (r#"{"verbose": "yes"}"#, "verbose"),
         (r#"{"journal_days": 366}"#, "journal_days"),
         (r#"{"journal_days": -1}"#, "journal_days"),

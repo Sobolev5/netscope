@@ -793,6 +793,8 @@ fn settings_values(s: &Settings) -> serde_json::Value {
         "verbose": s.verbose,
         "show_window": s.show_window,
         "notifications": s.notifications,
+        "notify_categories": s.notify_categories.iter().map(|c| c.name()).collect::<Vec<_>>(),
+        "notify_snooze_until": s.notify_snooze_until,
         "journal_days": s.journal_days,
     })
 }

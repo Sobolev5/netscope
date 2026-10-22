@@ -2,11 +2,11 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::decode::dns;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Low,
@@ -14,7 +14,7 @@ pub enum Severity {
     High,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertKind {
     SensitiveHttp,
@@ -35,15 +35,128 @@ pub enum AlertKind {
     RouteChange,
     /// A watched route became markedly slower.
     LatencyIncrease,
+    /// The default route moved to another adapter (Wi-Fi ↔ Ethernet, a VPN tunnel came or went).
+    NetworkChange,
+    /// The public egress address (or country) changed: a VPN was switched on/off, another network.
+    EgressChange,
+    /// DNS queries started going to a resolver never seen before.
+    DnsResolverChange,
+    /// A program opened a connection that looks like remote control, SMB to the internet,
+    /// direct SMTP, or an unsigned program talking to a bare IP.
+    SuspiciousConnection,
+    /// Many ports of one host probed in a short time (inbound: someone scans us; outbound: a
+    /// program scans a host).
+    PortScan,
+    /// A program sent a lot of data to one host.
+    LargeUpload,
+    /// Live capture stopped with an error (adapter gone, driver problem).
+    CaptureFailed,
 }
 
-#[derive(Debug, Clone, Serialize)]
+/// What an alert is about; the desktop app lets notifications be switched per category.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Category {
+    /// Threat indicators: credentials, suspicious DNS, scans, unsigned programs…
+    Security,
+    /// "First time seen": programs, destinations, countries, listeners.
+    Novelty,
+    /// The machine's own connectivity: adapters, VPN, egress, resolver, capture.
+    Network,
+    /// Watched routes.
+    Routes,
+}
+
+impl Category {
+    pub const ALL: [Category; 4] = [Category::Security, Category::Novelty, Category::Network, Category::Routes];
+
+    /// The name used in settings and JSON (`security`, `novelty`, `network`, `routes`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Category::Security => "security",
+            Category::Novelty => "novelty",
+            Category::Network => "network",
+            Category::Routes => "routes",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Category> {
+        Category::ALL.into_iter().find(|c| c.name() == s.trim().to_ascii_lowercase())
+    }
+}
+
+impl AlertKind {
+    pub const ALL: [AlertKind; 18] = [
+        AlertKind::SensitiveHttp,
+        AlertKind::SuspiciousDns,
+        AlertKind::VolumeSpike,
+        AlertKind::CleartextProtocol,
+        AlertKind::NewProcess,
+        AlertKind::NewDestination,
+        AlertKind::NewCountry,
+        AlertKind::NewListener,
+        AlertKind::UnsignedProcess,
+        AlertKind::RouteChange,
+        AlertKind::LatencyIncrease,
+        AlertKind::NetworkChange,
+        AlertKind::EgressChange,
+        AlertKind::DnsResolverChange,
+        AlertKind::SuspiciousConnection,
+        AlertKind::PortScan,
+        AlertKind::LargeUpload,
+        AlertKind::CaptureFailed,
+    ];
+
+    pub fn category(self) -> Category {
+        match self {
+            AlertKind::SensitiveHttp
+            | AlertKind::SuspiciousDns
+            | AlertKind::VolumeSpike
+            | AlertKind::CleartextProtocol
+            | AlertKind::UnsignedProcess
+            | AlertKind::SuspiciousConnection
+            | AlertKind::PortScan
+            | AlertKind::LargeUpload => Category::Security,
+            AlertKind::NewProcess | AlertKind::NewDestination | AlertKind::NewCountry | AlertKind::NewListener => Category::Novelty,
+            AlertKind::NetworkChange | AlertKind::EgressChange | AlertKind::DnsResolverChange | AlertKind::CaptureFailed => Category::Network,
+            AlertKind::RouteChange | AlertKind::LatencyIncrease => Category::Routes,
+        }
+    }
+
+    /// The snake_case name used in JSON (`new_process`, `egress_change`…).
+    pub fn name(self) -> &'static str {
+        match self {
+            AlertKind::SensitiveHttp => "sensitive_http",
+            AlertKind::SuspiciousDns => "suspicious_dns",
+            AlertKind::VolumeSpike => "volume_spike",
+            AlertKind::CleartextProtocol => "cleartext_protocol",
+            AlertKind::NewProcess => "new_process",
+            AlertKind::NewDestination => "new_destination",
+            AlertKind::NewCountry => "new_country",
+            AlertKind::NewListener => "new_listener",
+            AlertKind::UnsignedProcess => "unsigned_process",
+            AlertKind::RouteChange => "route_change",
+            AlertKind::LatencyIncrease => "latency_increase",
+            AlertKind::NetworkChange => "network_change",
+            AlertKind::EgressChange => "egress_change",
+            AlertKind::DnsResolverChange => "dns_resolver_change",
+            AlertKind::SuspiciousConnection => "suspicious_connection",
+            AlertKind::PortScan => "port_scan",
+            AlertKind::LargeUpload => "large_upload",
+            AlertKind::CaptureFailed => "capture_failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alert {
     pub id: u64,
     /// Unix seconds (packet time).
     pub ts: i64,
     pub severity: Severity,
     pub kind: AlertKind,
+    /// `kind.category()`, repeated so clients need not know the mapping.
+    pub category: Category,
     /// Remote IP the alert is about; `null` for alerts about a program or a route.
     pub host: Option<String>,
     pub name: Option<String>,
@@ -126,6 +239,7 @@ impl AlertLog {
             ts,
             severity: a.severity,
             kind: a.kind,
+            category: a.kind.category(),
             host: a.host,
             name: a.name,
             message: a.message,
@@ -279,6 +393,32 @@ mod tests {
 
         let txt = inspect_dns("example.com", dns::TYPE_TXT).unwrap();
         assert_eq!((txt.severity, txt.reason, txt.value.as_str()), (Severity::Low, "rare_type", "TXT"));
+    }
+
+    #[test]
+    fn kind_names_match_serde_and_every_kind_has_a_category() {
+        for k in AlertKind::ALL {
+            let json = serde_json::to_value(k).unwrap();
+            assert_eq!(json.as_str(), Some(k.name()), "{k:?}");
+            let _ = k.category();
+        }
+        for c in Category::ALL {
+            assert_eq!(serde_json::to_value(c).unwrap().as_str(), Some(c.name()));
+            assert_eq!(Category::parse(c.name()), Some(c));
+            assert_eq!(Category::parse(&format!(" {} ", c.name().to_uppercase())), Some(c));
+        }
+        assert_eq!(Category::parse("bogus"), None);
+        assert_eq!(AlertKind::EgressChange.category(), Category::Network);
+        assert_eq!(AlertKind::PortScan.category(), Category::Security);
+    }
+
+    #[test]
+    fn alerts_carry_their_category() {
+        let mut log = AlertLog::new(4, 60);
+        log.push(1, NewAlert { severity: Severity::Low, kind: AlertKind::RouteChange, host: None, name: None, message: "m".into(), details: BTreeMap::new(), key: "k".into() });
+        assert_eq!(log.last().unwrap().category, Category::Routes);
+        let v = serde_json::to_value(log.last().unwrap()).unwrap();
+        assert_eq!(v["category"], "routes");
     }
 
     #[test]

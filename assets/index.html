@@ -26,7 +26,7 @@
   .scroll::-webkit-scrollbar-thumb { background: #cfd4dc; border-radius: 6px; border: 2px solid #fff; }
   .cc { display: inline-block; min-width: 22px; padding: 0 4px; border: 1px solid #cbd2dc; border-radius: 3px; font: 600 10px/16px ui-monospace, Consolas, monospace; color: #374151; background: #fff; text-align: center; }
   .chip { display: inline-block; padding: 0 6px; border-radius: 4px; font: 600 10px/17px ui-sans-serif, system-ui, sans-serif; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; }
-  .nav a { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 7px; color: #374151; text-decoration: none; }
+  .nav a { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 12px; border-radius: 7px; color: #374151; text-decoration: none; }
   .nav a:hover { background: #f1f3f6; }
   .nav a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   .nav svg { width: 17px; height: 17px; flex: none; }
@@ -100,7 +100,7 @@
   </header>
 
   <div class="flex flex-1">
-    <aside class="sticky top-[45px] hidden h-[calc(100vh-45px)] w-56 shrink-0 overflow-y-auto border-r border-[#e3e6eb] bg-white p-2 md:block">
+    <aside class="sticky top-[45px] hidden h-[calc(100vh-45px)] w-60 shrink-0 overflow-y-auto border-r border-[#e3e6eb] bg-white p-2 md:block">
       <nav class="nav space-y-0.5" id="nav"></nav>
       <div class="mt-4 border-t border-[#eef0f3] px-3 pt-3 text-[11px] leading-5 text-slate-400" id="side-info"></div>
     </aside>
@@ -200,6 +200,24 @@ const I18N = {
     alert_latency_increase: "Маршрут до {host} стал медленнее: {before_ms} мс → {after_ms} мс",
     kind_sensitive_http: "Пароли/токены по HTTP", kind_suspicious_dns: "Подозрительный DNS", kind_volume_spike: "Всплеск трафика", kind_cleartext_protocol: "Незашифрованный протокол",
     kind_new_process: "Новая программа в сети", kind_new_destination: "Новое направление", kind_new_country: "Новая страна", kind_new_listener: "Новый открытый порт", kind_unsigned_process: "Неподписанная программа", kind_route_change: "Смена маршрута", kind_latency_increase: "Рост задержки",
+    kind_network_change: "Смена сети", kind_egress_change: "Смена точки выхода", kind_dns_resolver_change: "Новый DNS-сервер", kind_suspicious_connection: "Подозрительное соединение", kind_port_scan: "Сканирование портов", kind_large_upload: "Большая отправка данных", kind_capture_failed: "Захват остановлен",
+    alert_network_change: "Сеть изменилась: трафик идёт через {after} (раньше — {before})",
+    alert_network_change_on: "Трафик пошёл через VPN-адаптер «{after}» (раньше — {before})",
+    alert_network_change_off: "VPN-адаптер «{before}» больше не используется, трафик идёт через {after}",
+    alert_egress_change: "Точка выхода в интернет изменилась: {before} → {after}",
+    alert_egress_change_on: "VPN включён: выход в интернет теперь {after} (был {before})",
+    alert_egress_change_off: "VPN выключен: выход в интернет снова {after} (был {before})",
+    alert_dns_resolver_change: "DNS-запросы пошли на новый сервер {after} (раньше — {before})",
+    alert_susp_remote_control: "{process} подключается к {endpoint}: порт {port} типичен для удалённого управления и вредоносных программ ({service})",
+    alert_susp_smb: "{process} открывает файловый доступ {service} к {endpoint} в интернете",
+    alert_susp_mail: "{process} отправляет почту напрямую на {endpoint} (SMTP) — так ведут себя спам-боты",
+    alert_susp_unsigned_ip: "Неподписанная программа {process} подключается к {endpoint} по IP без доменного имени",
+    alert_port_scan_in: "Сканирование портов с {host}: {ports} портов за {seconds} с",
+    alert_port_scan_out: "{process} сканирует порты {host}: {ports} портов за {seconds} с",
+    alert_large_upload: "{process} отправил {size} на {destination} за {minutes} мин",
+    alert_capture_failed: "Захват трафика остановился: {error}",
+    cat_security: "Безопасность", cat_novelty: "Новое в сети", cat_network: "Сеть и VPN", cat_routes: "Маршруты",
+    set_notify_cats: "О чём уведомлять", set_snoozed: "Уведомления отключены до {t}", set_unsnooze: "включить снова", set_notify_hint: "Уровень и категории действуют сразу; то же меню есть у значка в трее.",
   },
   en: {
     connecting: "connecting…", starting: "starting", live: "● live", replay: "replaying", finished: "finished", failed: "capture failed",
@@ -282,6 +300,24 @@ const I18N = {
     alert_latency_increase: "Route to {host} got slower: {before_ms} ms → {after_ms} ms",
     kind_sensitive_http: "Credentials over HTTP", kind_suspicious_dns: "Suspicious DNS", kind_volume_spike: "Traffic spike", kind_cleartext_protocol: "Cleartext protocol",
     kind_new_process: "New program online", kind_new_destination: "New destination", kind_new_country: "New country", kind_new_listener: "New open port", kind_unsigned_process: "Unsigned program", kind_route_change: "Route change", kind_latency_increase: "Latency increase",
+    kind_network_change: "Network change", kind_egress_change: "Internet exit changed", kind_dns_resolver_change: "New DNS resolver", kind_suspicious_connection: "Suspicious connection", kind_port_scan: "Port scan", kind_large_upload: "Large upload", kind_capture_failed: "Capture stopped",
+    alert_network_change: "Network changed: traffic goes through {after} (was {before})",
+    alert_network_change_on: "Traffic now goes through the VPN adapter “{after}” (was {before})",
+    alert_network_change_off: "The VPN adapter “{before}” is no longer used; traffic goes through {after}",
+    alert_egress_change: "The internet exit changed: {before} → {after}",
+    alert_egress_change_on: "VPN is on: the internet exit is now {after} (was {before})",
+    alert_egress_change_off: "VPN is off: the internet exit is {after} again (was {before})",
+    alert_dns_resolver_change: "DNS queries now go to a new server {after} (before: {before})",
+    alert_susp_remote_control: "{process} connects to {endpoint}: port {port} is typical of remote control and malware ({service})",
+    alert_susp_smb: "{process} opens {service} file sharing to {endpoint} on the internet",
+    alert_susp_mail: "{process} sends mail directly to {endpoint} (SMTP) — spam bots do that",
+    alert_susp_unsigned_ip: "Unsigned program {process} connects to {endpoint} by IP without a domain name",
+    alert_port_scan_in: "Port scan from {host}: {ports} ports in {seconds} s",
+    alert_port_scan_out: "{process} scans ports of {host}: {ports} ports in {seconds} s",
+    alert_large_upload: "{process} sent {size} to {destination} in {minutes} min",
+    alert_capture_failed: "Traffic capture stopped: {error}",
+    cat_security: "Security", cat_novelty: "New activity", cat_network: "Network and VPN", cat_routes: "Routes",
+    set_notify_cats: "Notify about", set_snoozed: "Notifications are muted until {t}", set_unsnooze: "unmute", set_notify_hint: "The level and the categories apply at once; the tray icon's menu has the same switches.",
   },
 };
 
@@ -313,6 +349,18 @@ const PROTO = {
   tcp: ["#f3f2ff", "#4338ca"], udp: ["#e8f4ff", "#1d4ed8"], icmp: ["#fce0ff", "#a21caf"], other: ["#f1f2f4", "#4b5563"],
 };
 const SEV_CLASS = { high: "bg-red-100 text-red-800", medium: "bg-amber-100 text-amber-800", low: "bg-sky-100 text-sky-800" };
+// One small icon per alert category (stroke icons, 24-unit grid); see Category in the backend.
+const CAT_PATH = {
+  security: '<path d="M12 3l7 2.5v5.5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V5.5L12 3z"/><path d="M9 12l2 2 4-4"/>',
+  novelty: '<path d="M12 4l1.8 4.7L18.5 10.5l-4.7 1.8L12 17l-1.8-4.7L5.5 10.5l4.7-1.8z"/><path d="M19 3v3M17.5 4.5h3M5 17v3M3.5 18.5h3"/>',
+  network: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.8 2.5 2.8 14.5 0 17M12 3.5c-2.8 2.5-2.8 14.5 0 17"/>',
+  routes: '<path d="M5 19h7.5a3.5 3.5 0 000-7h-1a3.5 3.5 0 010-7H19"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>',
+};
+const CAT_COLOR = { security: "text-red-500", novelty: "text-violet-500", network: "text-sky-500", routes: "text-emerald-600" };
+function catIcon(cat, cls = "") {
+  const c = CAT_PATH[cat] ? cat : "security";
+  return `<svg class="inline-block h-[14px] w-[14px] shrink-0 ${CAT_COLOR[c]} ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><title>${t("cat_" + c)}</title>${CAT_PATH[c]}</svg>`;
+}
 const STATE_CLASS = { opening: "text-amber-700", established: "text-emerald-700", closing: "text-amber-700", closed: "text-slate-400", active: "text-emerald-700" };
 const SOURCE = { sni: "SNI", dns: "DNS", http: "Host" };
 
@@ -373,8 +421,13 @@ function alertText(a) {
   if (a.kind === "volume_spike") { d.rate = fmtRate(Number(a.details.rate)); d.baseline = fmtRate(Number(a.details.baseline)); }
   d.host = esc(a.host || "");
   let key = "alert_" + a.kind;
-  if (a.kind === "suspicious_dns") key = "alert_dns_" + ((a.details && a.details.reason) || "");
-  if (a.kind === "unsigned_process" && a.details && a.details.risky_location === "true") key = "alert_unsigned_process_risky";
+  const det = a.details || {};
+  if (a.kind === "suspicious_dns") key = "alert_dns_" + (det.reason || "");
+  if (a.kind === "unsigned_process" && det.risky_location === "true") key = "alert_unsigned_process_risky";
+  if (a.kind === "suspicious_connection") key = "alert_susp_" + (det.reason || "");
+  if (a.kind === "port_scan") key = "alert_port_scan_" + (det.direction === "in" ? "in" : "out");
+  if ((a.kind === "network_change" || a.kind === "egress_change") && (det.vpn === "on" || det.vpn === "off")) key += "_" + det.vpn;
+  if (a.kind === "large_upload") d.size = fmtBytes(Number(det.bytes));
   const s = t(key, d);
   return s === key ? esc(a.message) : s;
 }
@@ -448,8 +501,8 @@ function renderNav() {
   const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
   $("nav").innerHTML = NAV.map((k) => {
     const n = counts[k];
-    const badge = n ? `<span class="num ml-auto text-[11px] ${k === "alerts" ? "rounded-full bg-red-100 px-1.5 text-red-700" : "text-slate-500"}">${fmtNum(n)}</span>` : "";
-    return `<a href="#/${k}" class="${active === k ? "on" : ""}" ${active === k ? 'aria-current="page"' : ""}>${icon(k)}${t("nav_" + k)}${badge}</a>`;
+    const badge = n ? `<span class="num ml-auto shrink-0 text-[11px] ${k === "alerts" ? "rounded-full bg-red-100 px-1.5 text-red-700" : "text-slate-500"}">${fmtNum(n)}</span>` : "";
+    return `<a href="#/${k}" class="${active === k ? "on" : ""}" ${active === k ? 'aria-current="page"' : ""}>${icon(k)}<span class="truncate">${t("nav_" + k)}</span>${badge}</a>`;
   }).join("");
   $("nav-m").innerHTML = NAV.map((k) => `<a href="#/${k}" class="${active === k ? "on" : ""}">${icon(k)}<span>${t("nav_" + k)}${k === "alerts" && counts.alerts ? ` <b class="text-red-600">${fmtNum(counts.alerts)}</b>` : ""}</span></a>`).join("");
 }
@@ -1028,7 +1081,7 @@ async function refreshSockets() {
 function alertItem(a) {
   const target = a.host ? `data-host="${esc(a.host)}"` : a.details && a.details.process ? `data-procname="${esc(a.details.process)}"` : "";
   return `<div class="clickable cursor-pointer px-4 py-2 hover:bg-slate-50" ${target}>
-    <div class="flex items-center gap-2 text-[12px]"><span class="chip ${SEV_CLASS[a.severity] || SEV_CLASS.low}">${t("sev_" + a.severity)}</span><span class="font-medium">${t("kind_" + a.kind)}</span><span class="num ml-auto text-slate-400">${clock(a.ts)}</span></div>
+    <div class="flex items-center gap-2 text-[12px]"><span class="chip ${SEV_CLASS[a.severity] || SEV_CLASS.low}">${t("sev_" + a.severity)}</span>${catIcon(a.category)}<span class="font-medium">${t("kind_" + a.kind)}</span><span class="num ml-auto text-slate-400">${clock(a.ts)}</span></div>
     <div class="mt-0.5 break-words">${alertText(a)}</div>${a.host ? `<div class="mono text-[11px] text-slate-400">${esc(a.host)}${a.name ? " · " + esc(a.name) : ""}</div>` : ""}</div>`;
 }
 
@@ -1048,7 +1101,8 @@ async function loadSettings() {
     const d = await getJson("/api/settings");
     st.data = d;
     const v = d.values;
-    st.form = { port: v.port === null ? "" : String(v.port), host: v.host || "127.0.0.1", interface: v.interface || "", filter: v.filter || "", promiscuous: !!v.promiscuous, verbose: !!v.verbose, egress_check: !!v.egress_check, show_window: !!v.show_window, notifications: v.notifications || "medium", autostart: d.autostart, journal_days: String(v.journal_days ?? 1) };
+    st.form = { port: v.port === null ? "" : String(v.port), host: v.host || "127.0.0.1", interface: v.interface || "", filter: v.filter || "", promiscuous: !!v.promiscuous, verbose: !!v.verbose, egress_check: !!v.egress_check, show_window: !!v.show_window, notifications: v.notifications || "medium", autostart: d.autostart, journal_days: String(v.journal_days ?? 1), notify_snooze_until: Number(v.notify_snooze_until) || 0 };
+    for (const c of ["security", "novelty", "network", "routes"]) st.form["cat_" + c] = !Array.isArray(v.notify_categories) || v.notify_categories.includes(c);
     getJson("/api/journal/stats").then((j) => { st.jstats = j; if (route.name === "settings") renderView(); }).catch(() => {});
   } catch (e) { st.status = { error: String(e.message || e) }; }
   if (route.name === "settings") renderView();
@@ -1062,7 +1116,7 @@ async function saveSettings() {
   const st = ui.settings, f = st.form;
   if (!f || st.saving) return;
   st.saving = true; st.status = null; renderView();
-  const body = { port: f.port.trim() === "" ? null : Number(f.port), port_auto: f.port.trim() === "", host: f.host.trim(), interface: f.interface, filter: f.filter.trim(), promiscuous: f.promiscuous, verbose: f.verbose, egress_check: f.egress_check, show_window: f.show_window, notifications: f.notifications, journal_days: Number(f.journal_days) };
+  const body = { port: f.port.trim() === "" ? null : Number(f.port), port_auto: f.port.trim() === "", host: f.host.trim(), interface: f.interface, filter: f.filter.trim(), promiscuous: f.promiscuous, verbose: f.verbose, egress_check: f.egress_check, show_window: f.show_window, notifications: f.notifications, journal_days: Number(f.journal_days), notify_categories: ["security", "novelty", "network", "routes"].filter((c) => f["cat_" + c]), notify_snooze_until: f.notify_snooze_until || 0 };
   if (st.data && st.data.autostart !== null && st.data.autostart !== undefined) body.autostart = !!f.autostart;
   try {
     const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -1113,7 +1167,9 @@ function viewSettings() {
   const network = section(t("set_network"), check("set-egress", t("set_egress"), f.egress_check));
   const notifyOptions = ["medium", "high", "off"].map((k) => `<option value="${k}" ${f.notifications === k ? "selected" : ""}>${t("nlevel_" + k)}</option>`).join("");
   const appSection = section(t("set_app"), `${d.autostart !== null && d.autostart !== undefined ? check("set-autostart", t("set_autostart"), f.autostart) : ""}${check("set-show-window", t("set_show_window"), f.show_window)}
-    ${field(t("set_notify"), `<select id="set-notifications" class="input w-full">${notifyOptions}</select>`)}`);
+    ${field(t("set_notify"), `<select id="set-notifications" class="input w-full">${notifyOptions}</select>`)}
+    ${field(t("set_notify_cats"), `<div class="grid grid-cols-2 gap-x-4">${["security", "novelty", "network", "routes"].map((c) => `<label class="flex items-center gap-2 py-1"><input type="checkbox" id="set-cat-${c}" ${f["cat_" + c] ? "checked" : ""}> ${catIcon(c)}<span>${t("cat_" + c)}</span></label>`).join("")}</div>`, t("set_notify_hint"))}
+    ${f.notify_snooze_until > Date.now() / 1000 ? `<div class="text-[12px] text-amber-700">${t("set_snoozed", { t: clock(f.notify_snooze_until) })} · <button class="btn" id="set-unsnooze">${t("set_unsnooze")}</button></div>` : ""}`);
   const g = d.geoip || {};
   const geo = section(t("set_geo"), `<div>${g.enabled ? `<span class="text-emerald-700">${t("set_geo_on", { dir: `<span class="mono">${esc(g.dir || "")}</span>` })}</span>` : `<span class="text-amber-700">${t("set_geo_off")}</span><div class="mt-1 text-[12px] text-slate-500">${t("geo_hint")}</div>`}</div>`);
   const a = d.active || {};
@@ -1186,7 +1242,7 @@ function journalRows(kind, recs, nowSec) {
       <td class="text-[12px]">${e.requester ? esc(e.requester.name) : dash}</td>
       <td class="mono text-[11px] text-slate-500">${esc(e.resolver || "")} · ${esc(e.transport || "")}</td></tr>`).join(""); }
   return recs.map((a) => `<tr><td class="num whitespace-nowrap text-[12px] text-slate-500">${clock(a.ts)}</td><td><span class="chip ${SEV_CLASS[a.severity] || SEV_CLASS.low}">${t("sev_" + a.severity)}</span></td>
-      <td class="whitespace-nowrap font-medium">${t("kind_" + a.kind)}</td><td class="break-words">${alertText(a)}</td><td class="mono text-[11px] text-slate-500">${esc(a.host || "")}</td></tr>`).join("");
+      <td class="whitespace-nowrap font-medium">${catIcon(a.category, "mr-1 align-[-2px]")}${t("kind_" + a.kind)}</td><td class="break-words">${alertText(a)}</td><td class="mono text-[11px] text-slate-500">${esc(a.host || "")}</td></tr>`).join("");
 }
 
 function viewJournal(s) {
@@ -1494,6 +1550,7 @@ $("view").addEventListener("click", (ev) => {
   if ((x = hit("[data-jrange]"))) { ui.journal.range = x.dataset.jrange; renderView(); refreshJournal(); return; }
   if (el.id === "journal-refresh") { ui.journal.stats = null; refreshJournal(); return; }
   if (el.id === "set-restart") { restartNow(); }
+  if (el.id === "set-unsnooze" && ui.settings.form) { ui.settings.form.notify_snooze_until = 0; saveSettings(); }
 });
 
 // Settings form: keep the edited values in ui.settings.form (the page re-renders on save).

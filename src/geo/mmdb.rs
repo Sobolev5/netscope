@@ -202,7 +202,7 @@ impl Decoder<'_> {
         }
         let ctrl = self.byte(at)?;
         let mut pos = at + 1;
-        let mut kind = ctrl >> 5;
+        let mut kind = u16::from(ctrl >> 5);
         if kind == 1 {
             // Pointer: resolve and decode the target, but continue after the pointer itself.
             let ss = (ctrl >> 3) & 0x3;
@@ -213,11 +213,12 @@ impl Decoder<'_> {
                 2 => (((vvv << 24) | self.uint(pos, 3)? as usize) + 526_336, 3),
                 _ => (self.uint(pos, 4)? as usize, 4),
             };
-            let (v, _) = self.value(self.base + ptr, depth + 1)?;
+            let target = self.base.checked_add(ptr).ok_or_else(|| err("pointer out of range"))?;
+            let (v, _) = self.value(target, depth + 1)?;
             return Ok((v, pos + len));
         }
         if kind == 0 {
-            kind = 7 + self.byte(pos)?;
+            kind = 7 + u16::from(self.byte(pos)?);
             pos += 1;
         }
         let mut size = (ctrl & 0x1F) as usize;

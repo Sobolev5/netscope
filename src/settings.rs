@@ -12,10 +12,26 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::analytics::Category;
+
 pub const FILE_NAME: &str = "netscope.ini";
 const BOM: char = '\u{feff}';
 /// Known keys, in the order new lines are appended to a file that lacks them.
-pub const KEYS: [&str; 11] = ["port", "host", "interface", "filter", "geoip", "egress_check", "promiscuous", "verbose", "show_window", "notifications", "journal_days"];
+pub const KEYS: [&str; 13] = [
+    "port",
+    "host",
+    "interface",
+    "filter",
+    "geoip",
+    "egress_check",
+    "promiscuous",
+    "verbose",
+    "show_window",
+    "notifications",
+    "notify_categories",
+    "notify_snooze_until",
+    "journal_days",
+];
 /// Longest journal retention the settings accept (days).
 pub const MAX_JOURNAL_DAYS: u32 = 365;
 pub const NOTIFICATION_LEVELS: [&str; 3] = ["medium", "high", "off"];
@@ -75,6 +91,11 @@ pub struct Settings {
     pub show_window: bool,
     /// Desktop app notifications: `medium`, `high` or `off`.
     pub notifications: String,
+    /// Alert categories the desktop app notifies about (`security`, `novelty`, `network`,
+    /// `routes`), in `Category::ALL` order; a missing key means all of them.
+    pub notify_categories: Vec<Category>,
+    /// Notifications are muted until this unix time (0 = not muted).
+    pub notify_snooze_until: i64,
     /// Days of journal (finished connections, DNS, alerts) kept on disk; 0 = no journal.
     pub journal_days: u32,
 }
@@ -92,6 +113,8 @@ impl Default for Settings {
             verbose: false,
             show_window: true,
             notifications: "medium".into(),
+            notify_categories: Category::ALL.to_vec(),
+            notify_snooze_until: 0,
             journal_days: 1,
         }
     }
@@ -112,7 +135,27 @@ pub struct SettingsPatch {
     pub verbose: Option<bool>,
     pub show_window: Option<bool>,
     pub notifications: Option<String>,
+    pub notify_categories: Option<Vec<String>>,
+    pub notify_snooze_until: Option<i64>,
     pub journal_days: Option<u32>,
+}
+
+/// Parses a comma-separated category list; unknown names are reported.
+pub fn parse_categories(v: &str) -> Result<Vec<Category>, String> {
+    let mut out = Vec::new();
+    for part in v.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        match Category::parse(part) {
+            Some(c) if !out.contains(&c) => out.push(c),
+            Some(_) => {}
+            None => return Err(format!("unknown notification category `{part}` (expected one of security, novelty, network, routes)")),
+        }
+    }
+    out.sort_by_key(|c| Category::ALL.iter().position(|x| x == c));
+    Ok(out)
+}
+
+fn categories_text(cats: &[Category]) -> String {
+    cats.iter().map(|c| c.name()).collect::<Vec<_>>().join(",")
 }
 
 fn is_off(v: &str) -> bool {
@@ -238,6 +281,11 @@ impl Settings {
                 // `open_browser` is the pre-0.2 name of `show_window`.
                 "open_browser" if show_window.is_none() => s.show_window = !is_off(v),
                 "notifications" => s.notifications = normalize_level(v),
+                "notify_categories" => match parse_categories(v) {
+                    Ok(c) => s.notify_categories = c,
+                    Err(e) => tracing::warn!("{FILE_NAME}: ignoring notify_categories={v}: {e}"),
+                },
+                "notify_snooze_until" => s.notify_snooze_until = v.trim().parse::<i64>().unwrap_or(0).max(0),
                 "journal_days" if !v.is_empty() => match v.parse::<u32>() {
                     Ok(d) if d <= MAX_JOURNAL_DAYS => s.journal_days = d,
                     _ => tracing::warn!("{FILE_NAME}: ignoring journal_days={v}: not a number between 0 and {MAX_JOURNAL_DAYS}"),
@@ -274,8 +322,15 @@ impl Settings {
             ("verbose", flag(self.verbose).into()),
             ("show_window", flag(self.show_window).into()),
             ("notifications", self.notifications.clone()),
+            ("notify_categories", categories_text(&self.notify_categories)),
+            ("notify_snooze_until", self.notify_snooze_until.to_string()),
             ("journal_days", self.journal_days.to_string()),
         ]
+    }
+
+    /// Whether the desktop app should notify about an alert of `category` at `now`.
+    pub fn notifies(&self, category: Category, now: i64) -> bool {
+        self.notifications != "off" && self.notify_categories.contains(&category) && self.notify_snooze_until <= now
     }
 
     /// Command-line arguments for clap (`cli::Args`) equivalent to these settings.
@@ -337,6 +392,12 @@ impl Settings {
             }
             next.notifications = n;
         }
+        if let Some(c) = &patch.notify_categories {
+            next.notify_categories = parse_categories(&c.join(","))?;
+        }
+        if let Some(t) = patch.notify_snooze_until {
+            next.notify_snooze_until = t.max(0);
+        }
         if let Some(i) = &patch.interface {
             next.interface = non_empty(i);
         }
@@ -370,7 +431,7 @@ impl Settings {
 
     /// Whether going from `previous` to these settings changes anything the running program
     /// read at start (capture, dashboard address, geolocation, logging). `show_window`,
-    /// `notifications` and `journal_days` are read on the fly.
+    /// the notification keys and `journal_days` are read on the fly.
     pub fn needs_restart(&self, previous: &Settings) -> bool {
         self.port != previous.port
             || self.host != previous.host
@@ -398,6 +459,32 @@ fn normalize_level(v: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_categories_and_snooze() {
+        let s = Settings::from_pairs(&[("notify_categories".into(), "network, SECURITY,network,bogus".into())]);
+        assert_eq!(s.notify_categories, Category::ALL.to_vec(), "an unknown name leaves the default in place");
+        let s = Settings::from_pairs(&[("notify_categories".into(), "routes, Security".into()), ("notify_snooze_until".into(), "1760000000".into())]);
+        assert_eq!(s.notify_categories, vec![Category::Security, Category::Routes], "canonical order");
+        assert_eq!(s.pairs().iter().find(|(k, _)| *k == "notify_categories").unwrap().1, "security,routes");
+        assert!(s.notifies(Category::Security, 1_760_000_000) && !s.notifies(Category::Security, 1_759_999_999));
+        assert!(!s.notifies(Category::Novelty, 1_760_000_000), "not in the list");
+        let s = Settings::from_pairs(&[("notify_categories".into(), "".into())]);
+        assert!(s.notify_categories.is_empty(), "an empty list is none");
+        let s = Settings::from_pairs(&[("notify_snooze_until".into(), "-5".into()), ("notifications".into(), "off".into())]);
+        assert_eq!(s.notify_snooze_until, 0);
+        assert!(!s.notifies(Category::Network, 0), "off is off");
+
+        let mut s = Settings::default();
+        let bad = SettingsPatch { notify_categories: Some(vec!["network".into(), "nope".into()]), ..SettingsPatch::default() };
+        assert!(s.apply(&bad).unwrap_err().contains("nope"));
+        assert_eq!(s.notify_categories, Category::ALL.to_vec(), "nothing changed");
+        let ok = SettingsPatch { notify_categories: Some(vec!["routes".into(), "network".into()]), notify_snooze_until: Some(-1), ..SettingsPatch::default() };
+        s.apply(&ok).unwrap();
+        assert_eq!((s.notify_categories.clone(), s.notify_snooze_until), (vec![Category::Network, Category::Routes], 0));
+        assert!(!s.needs_restart(&Settings::default()), "notification keys apply on the fly");
+        assert_eq!(parse_categories("security,novelty,network,routes").unwrap(), Category::ALL.to_vec());
+    }
     use crate::cli::Args;
     use clap::Parser;
 
@@ -564,6 +651,8 @@ mod tests {
             verbose: true,
             show_window: false,
             notifications: "high".into(),
+            notify_categories: vec![Category::Security],
+            notify_snooze_until: 0,
             journal_days: 7,
         };
         let argv = s.to_args("netscope");
@@ -600,7 +689,7 @@ mod tests {
             let text = fs::read_to_string(p).unwrap();
             assert_eq!(
                 text,
-                "# NetScope settings\r\nport=9001\r\nnotifications=off\r\nshow_window=1\r\nunknown=keep me\r\nhost=127.0.0.1\r\ninterface=\r\nfilter=udp\r\ngeoip=D:\\geo\r\negress_check=1\r\npromiscuous=1\r\nverbose=0\r\njournal_days=1\r\n"
+                "# NetScope settings\r\nport=9001\r\nnotifications=off\r\nshow_window=1\r\nunknown=keep me\r\nhost=127.0.0.1\r\ninterface=\r\nfilter=udp\r\ngeoip=D:\\geo\r\negress_check=1\r\npromiscuous=1\r\nverbose=0\r\nnotify_categories=security,novelty,network,routes\r\nnotify_snooze_until=0\r\njournal_days=1\r\n"
             );
             for key in KEYS {
                 assert_eq!(text.lines().filter(|l| l.to_ascii_lowercase().starts_with(&format!("{key}="))).count(), 1, "{key} appears once");

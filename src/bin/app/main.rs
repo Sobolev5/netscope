@@ -1,6 +1,13 @@
 //! NetScope as a desktop program for Windows: its own window (the dashboard inside a
-//! WebView2 control), an icon in the notification area, system notifications for alerts,
-//! no console. The analysis itself is `netscope::app::run_with`; this is the shell around it.
+//! WebView2 control), an icon in the notification area, Windows notifications (toasts) for
+//! alerts, no console. The analysis itself is `netscope::app::run_with`; this is the shell
+//! around it.
+//!
+//! Notifications: a poller reads `/api/alerts`, keeps the ones the settings ask for (level,
+//! categories, quiet hour) and hands them to the UI thread, which shows toasts (`toast.rs`)
+//! with a category icon (`icons.rs`); a burst becomes one summary toast. Clicking a toast
+//! starts `netscope://…` through the registered URL protocol, which a second instance
+//! forwards to the running one (WM_COPYDATA). The tray menu switches all of this.
 //!
 //! Closing the window keeps NetScope running in the tray; "Quit" in the tray menu ends it.
 //! Without the WebView2 runtime the dashboard opens in the default browser instead.
@@ -13,6 +20,10 @@
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod icons;
+#[cfg(windows)]
+mod toast;
 #[cfg(windows)]
 mod webview;
 
@@ -30,6 +41,7 @@ fn main() {
 #[cfg(windows)]
 mod win {
     use std::cell::RefCell;
+    use std::collections::VecDeque;
     use std::fs::{self, File};
     use std::io::{Read, Write};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
@@ -38,38 +50,45 @@ mod win {
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use clap::Parser;
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
     use windows_sys::Win32::Graphics::Gdi::COLOR_WINDOW;
     use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+    use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Registry::{
         RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE,
         REG_SZ,
     };
     use windows_sys::Win32::System::Threading::CreateMutexW;
-    use windows_sys::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow, GetSystemMetricsForDpi, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
     use windows_sys::Win32::UI::Shell::{
         ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_ERROR, NIIF_INFO, NIIF_WARNING, NIM_ADD, NIM_DELETE,
         NIM_MODIFY, NOTIFYICONDATAW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, FindWindowW, GetClientRect,
-        GetCursorPos, GetMessageW, GetSystemMetrics, IsIconic, LoadCursorW, LoadIconW, MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW,
-        SetForegroundWindow, SetMenuDefaultItem, SetWindowPos, ShowWindow, TrackPopupMenu, TranslateMessage, CW_USEDEFAULT, IDC_ARROW,
-        IDI_APPLICATION, IDYES, MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MB_YESNO, MF_CHECKED, MF_SEPARATOR, MF_STRING, MINMAXINFO, MSG,
-        SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-        TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_GETMINMAXINFO, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
-        WM_MOVE, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_POPUP,
+        AppendMenuW, CheckMenuRadioItem, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
+        FindWindowW, GetClientRect, GetCursorPos, GetMessageW, GetSystemMetrics, IsIconic, LoadCursorW, LoadIconW,
+        MessageBoxW, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetForegroundWindow, SetMenuDefaultItem, SetMenuItemInfoW,
+        SetWindowPos, ShowWindow, TrackPopupMenu, TranslateMessage, CW_USEDEFAULT, HMENU, IDC_ARROW, IDI_APPLICATION, IDYES, MB_ICONERROR,
+        MB_ICONINFORMATION, MB_OK, MB_YESNO, MENUITEMINFOW, MF_BYCOMMAND, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, MIIM_BITMAP, MINMAXINFO,
+        MSG, SM_CXSCREEN, SM_CXSMICON, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, TPM_BOTTOMALIGN,
+        TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_CLOSE, WM_COMMAND, WM_COPYDATA, WM_DESTROY, WM_DPICHANGED, WM_GETMINMAXINFO,
+        WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_MOVE, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_POPUP,
     };
 
+    use netscope::analytics::text::{alert_text, category_label, kind_label};
+    use netscope::analytics::{Alert, Category, Severity};
     use netscope::app;
+    use netscope::capture::engine::unix_now;
     use netscope::cli::Args;
     use netscope::settings::{self, Settings, SettingsHost};
 
+    use super::icons::{self, color, glyph};
+    use super::toast;
     use super::webview::{self, WebView};
 
     const WM_TRAY: u32 = WM_APP + 1;
@@ -81,12 +100,27 @@ mod win {
     const WM_QUIT_APP: u32 = WM_APP + 6;
     const ID_OPEN: usize = 1;
     const ID_BROWSER: usize = 2;
-    const ID_NOTIFY: usize = 3;
     const ID_AUTOSTART: usize = 4;
     const ID_GEOIP: usize = 5;
     const ID_LOG: usize = 6;
     const ID_QUIT: usize = 7;
+    /// Notification level (radio items of the Notifications submenu).
+    const ID_NOTIFY_MEDIUM: usize = 20;
+    const ID_NOTIFY_HIGH: usize = 21;
+    const ID_NOTIFY_OFF: usize = 22;
+    /// Category check items: `ID_CAT_BASE + index in Category::ALL`.
+    const ID_CAT_BASE: usize = 30;
+    const ID_SNOOZE: usize = 40;
     const MAIN_CLASS: &str = "NetScopeMain";
+    const TRAY_CLASS: &str = "NetScopeTray";
+    /// `WM_COPYDATA.dwData` of a `netscope://` action forwarded by a second instance.
+    const COPYDATA_ACTION: usize = 0x4E53_4341;
+    /// "Quiet for an hour" from the tray menu or a toast button.
+    const SNOOZE_SECS: i64 = 3600;
+    /// Toasts shown one by one per poll; the rest of a burst become one summary toast.
+    const BURST_LIMIT: usize = 3;
+    /// Toasts per minute before everything is summarized.
+    const RATE_LIMIT: usize = 6;
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const RUN_VALUE: &str = "NetScope";
     const POWERSHELL: &str = r"WindowsPowerShell\v1.0\powershell.exe";
@@ -116,6 +150,8 @@ mod win {
         ready_once: AtomicBool,
         /// A restart happened: the alert poller forgets which alert ids it has seen.
         poller_reset: AtomicBool,
+        /// A `netscope://` action given on the command line, run once the dashboard is up.
+        pending_action: Mutex<Option<String>>,
     }
     static SHARED: OnceLock<Shared> = OnceLock::new();
 
@@ -185,8 +221,26 @@ mod win {
             ("open", false) => "Open NetScope",
             ("browser", true) => "Открыть в браузере",
             ("browser", false) => "Open in the browser",
-            ("notify", true) => "Уведомления о предупреждениях",
-            ("notify", false) => "Alert notifications",
+            ("notify", true) => "Уведомления",
+            ("notify", false) => "Notifications",
+            ("level_medium", true) => "Важные и средние",
+            ("level_medium", false) => "High and medium",
+            ("level_high", true) => "Только важные",
+            ("level_high", false) => "High only",
+            ("level_off", true) => "Выключены",
+            ("level_off", false) => "Off",
+            ("snooze", true) => "Не беспокоить час",
+            ("snooze", false) => "Quiet for an hour",
+            ("snoozed", true) => "Тихий режим до {t} — отменить",
+            ("snoozed", false) => "Quiet until {t} — cancel",
+            ("toast_open", true) => "Открыть",
+            ("toast_open", false) => "Open",
+            ("toast_mute", true) => "Не уведомлять: {c}",
+            ("toast_mute", false) => "Mute: {c}",
+            ("more_title", true) => "Ещё предупреждения",
+            ("more_title", false) => "More alerts",
+            ("more_body", true) => "Ещё {n} за последнюю минуту. Откройте NetScope, чтобы посмотреть.",
+            ("more_body", false) => "{n} more in the last minute. Open NetScope to see them.",
             ("autostart", true) => "Запускать при входе в Windows",
             ("autostart", false) => "Start when I sign in",
             ("geoip", true) => "Скачать геоданные (страны и города)…",
@@ -221,28 +275,6 @@ mod win {
             ("geoip_fail", false) => "Could not start the download: {e}",
             ("log_hint", true) => "Подробности в журнале: {log}",
             ("log_hint", false) => "Details are in the log: {log}",
-            ("kind_sensitive_http", true) => "Пароли/токены по HTTP",
-            ("kind_sensitive_http", false) => "Credentials over HTTP",
-            ("kind_suspicious_dns", true) => "Подозрительный DNS",
-            ("kind_suspicious_dns", false) => "Suspicious DNS",
-            ("kind_volume_spike", true) => "Всплеск трафика",
-            ("kind_volume_spike", false) => "Traffic spike",
-            ("kind_cleartext_protocol", true) => "Незашифрованный протокол",
-            ("kind_cleartext_protocol", false) => "Cleartext protocol",
-            ("kind_new_process", true) => "Новая программа в сети",
-            ("kind_new_process", false) => "New program online",
-            ("kind_new_destination", true) => "Новое направление",
-            ("kind_new_destination", false) => "New destination",
-            ("kind_new_country", true) => "Новая страна",
-            ("kind_new_country", false) => "New country",
-            ("kind_new_listener", true) => "Новый открытый порт",
-            ("kind_new_listener", false) => "New open port",
-            ("kind_unsigned_process", true) => "Неподписанная программа",
-            ("kind_unsigned_process", false) => "Unsigned program",
-            ("kind_route_change", true) => "Смена маршрута",
-            ("kind_route_change", false) => "Route change",
-            ("kind_latency_increase", true) => "Рост задержки",
-            ("kind_latency_increase", false) => "Latency increase",
             _ => key,
         };
         s.to_string()
@@ -269,10 +301,34 @@ mod win {
         Args::try_parse_from(Settings::load(ini).to_args("netscope-app")).map_err(|e| format!("{}: {e}", ini.display()))
     }
 
-    /// The notification level (`medium`, `high`, `off`), read from the file every time so a
-    /// change on the Settings page applies without a restart.
-    fn notify_level() -> String {
-        Settings::load(&shared().ini()).notifications
+    /// The notification settings, read from the file every time so a change on the Settings
+    /// page or in the tray menu applies without a restart.
+    fn notify_settings() -> Settings {
+        Settings::load(&shared().ini())
+    }
+
+    fn save_setting(key: &str, value: &str) {
+        if let Err(e) = settings::write_setting(&shared().ini(), key, value) {
+            tracing::warn!("cannot save {key}: {e}");
+        }
+    }
+
+    /// `HH:MM` of a unix time in local time (for "quiet until …").
+    fn clock(ts: i64) -> String {
+        // SAFETY: plain conversions of a timestamp; both structures are written by the calls.
+        unsafe {
+            use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+            use windows_sys::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+            // 100 ns intervals since 1601-01-01.
+            let ft = (ts as u64 + 11_644_473_600) * 10_000_000;
+            let ft = FILETIME { dwLowDateTime: ft as u32, dwHighDateTime: (ft >> 32) as u32 };
+            let mut utc: SYSTEMTIME = std::mem::zeroed();
+            let mut local: SYSTEMTIME = std::mem::zeroed();
+            if FileTimeToSystemTime(&ft, &mut utc) == 0 || SystemTimeToTzSpecificLocalTime(null(), &utc, &mut local) == 0 {
+                return String::new();
+            }
+            format!("{:02}:{:02}", local.wHour, local.wMinute)
+        }
     }
 
     /// Log to a file: there is no console. The previous run is kept as `.1`.
@@ -442,31 +498,287 @@ mod win {
         unsafe { Shell_NotifyIconW(NIM_DELETE, &d) };
     }
 
+    // ----- notifications (toasts, balloons as the fallback) -----
+
+    fn icon_dir() -> PathBuf {
+        shared().dir.join("icons")
+    }
+
+    /// The category badge (white glyph on a coloured circle) for toasts; `None` when it
+    /// cannot be drawn (the toast then shows the application icon).
+    fn badge(category: Option<Category>) -> Option<PathBuf> {
+        let (name, g, c) = match category {
+            Some(Category::Security) => ("security", glyph::SHIELD, color::SECURITY),
+            Some(Category::Novelty) => ("novelty", glyph::EYE, color::NOVELTY),
+            Some(Category::Network) => ("network", glyph::NETWORK, color::NETWORK),
+            Some(Category::Routes) => ("routes", glyph::MAP_PIN, color::ROUTES),
+            None => ("info", glyph::INFO, color::INFO),
+        };
+        match icons::badge_png(&icon_dir(), name, g, c, 96) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                warn_once(&format!("notification icons unavailable: {e}"));
+                None
+            }
+        }
+    }
+
+    /// Logs a message once per process (the same failure would repeat with every toast).
+    fn warn_once(msg: &str) {
+        static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let mut seen = lock(&SEEN);
+        if !seen.iter().any(|m| m == msg) {
+            tracing::warn!("{msg}");
+            seen.push(msg.to_string());
+        }
+    }
+
+    /// An informational notification (started, restarted, hidden): a toast, else a balloon.
+    fn notify(title: &str, body: &str, level: u32) {
+        let image = badge(None);
+        let t = toast::Toast {
+            title,
+            body,
+            attribution: "",
+            image: image.as_deref(),
+            launch: "netscope://open",
+            actions: &[],
+            tag: "info",
+            group: "netscope",
+            sound: false,
+        };
+        if let Err(e) = toast::show(&t) {
+            warn_once(&format!("toast notifications unavailable, using tray balloons: {e}"));
+            balloon(title, body, level);
+        }
+    }
+
+    /// Shows the alerts the poller found: up to `BURST_LIMIT` toasts per batch and
+    /// `RATE_LIMIT` per minute, the rest as one "N more" toast (replaced in place).
+    fn notify_alerts(alerts: Vec<Alert>) {
+        thread_local! {
+            static SHOWN: RefCell<VecDeque<Instant>> = const { RefCell::new(VecDeque::new()) };
+        }
+        let ru = shared().russian;
+        let now = Instant::now();
+        SHOWN.with(|s| s.borrow_mut().retain(|t| now.duration_since(*t) < Duration::from_secs(60)));
+        let mut shown = 0usize;
+        let mut extra = 0usize;
+        for a in &alerts {
+            if shown >= BURST_LIMIT || SHOWN.with(|s| s.borrow().len()) >= RATE_LIMIT {
+                extra += 1;
+                continue;
+            }
+            show_alert(a, ru);
+            shown += 1;
+            SHOWN.with(|s| s.borrow_mut().push_back(now));
+        }
+        if extra > 0 {
+            let title = text("more_title");
+            let body = text("more_body").replace("{n}", &extra.to_string());
+            let image = badge(None);
+            let t = toast::Toast {
+                title: &title,
+                body: &body,
+                attribution: "NetScope",
+                image: image.as_deref(),
+                launch: "netscope://open/alerts",
+                actions: &[],
+                tag: "summary",
+                group: "netscope",
+                sound: false,
+            };
+            if toast::show(&t).is_err() {
+                balloon(&title, &body, NIIF_INFO);
+            }
+        }
+    }
+
+    fn show_alert(a: &Alert, ru: bool) {
+        let title = kind_label(a.kind, ru).to_string();
+        let body = alert_text(a, ru);
+        let category = category_label(a.category, ru);
+        let attribution = format!("NetScope · {category}");
+        let image = badge(Some(a.category));
+        let actions = [
+            (text("toast_open"), "netscope://open/alerts".to_string()),
+            (text("toast_mute").replace("{c}", category), format!("netscope://mute/{}", a.category.name())),
+        ];
+        let actions: Vec<(&str, String)> = actions.iter().map(|(l, u)| (l.as_str(), u.clone())).collect();
+        let tag = a.id.to_string();
+        let t = toast::Toast {
+            title: &title,
+            body: &body,
+            attribution: &attribution,
+            image: image.as_deref(),
+            launch: "netscope://open/alerts",
+            actions: &actions,
+            tag: &tag,
+            group: a.category.name(),
+            sound: a.severity == Severity::High,
+        };
+        if let Err(e) = toast::show(&t) {
+            warn_once(&format!("toast notifications unavailable, using tray balloons: {e}"));
+            balloon(&title, &body, if a.severity == Severity::High { NIIF_ERROR } else { NIIF_WARNING });
+        }
+    }
+
+    // ----- netscope:// actions (toast clicks, second instance) -----
+
+    /// What a `netscope://…` URL asks for.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Action {
+        /// Bring the window up, optionally at a dashboard route (`#/alerts`).
+        Open(Option<String>),
+        /// Quiet hour on (`Some(seconds)`) or off (`None`).
+        Snooze(Option<i64>),
+        /// Stop notifying about a category.
+        Mute(Category),
+    }
+
+    fn parse_action(url: &str) -> Option<Action> {
+        let rest = url.strip_prefix(&format!("{}://", toast::SCHEME))?;
+        let rest = rest.trim_end_matches('/');
+        let mut parts = rest.splitn(2, '/');
+        match (parts.next()?, parts.next()) {
+            ("open", None) => Some(Action::Open(None)),
+            ("open", Some(route)) if route.chars().all(|c| c.is_ascii_alphanumeric() || "/-_".contains(c)) => Some(Action::Open(Some(format!("#/{route}")))),
+            ("snooze", Some(min)) => Some(Action::Snooze(Some(min.parse::<i64>().ok().filter(|m| (1..=24 * 60).contains(m))? * 60))),
+            ("snooze", None) => Some(Action::Snooze(Some(SNOOZE_SECS))),
+            ("unsnooze", None) => Some(Action::Snooze(None)),
+            ("mute", Some(c)) => Category::parse(c).map(Action::Mute),
+            _ => None,
+        }
+    }
+
+    fn run_action(url: &str) {
+        let Some(action) = parse_action(url) else {
+            tracing::warn!("ignoring unknown action {url}");
+            return;
+        };
+        tracing::info!("action: {action:?}");
+        match action {
+            Action::Open(route) => {
+                show_main();
+                if let Some(route) = route {
+                    let url = dashboard_url();
+                    let navigated = WEBVIEW.with(|w| match w.borrow().as_ref() {
+                        Some(v) => {
+                            v.navigate(&format!("{url}/?app=1{route}"));
+                            true
+                        }
+                        None => false,
+                    });
+                    if !navigated && (*lock(&shared().main_hwnd) as HWND).is_null() {
+                        open_url(&format!("{url}/{route}"));
+                    }
+                }
+            }
+            Action::Snooze(Some(secs)) => save_setting("notify_snooze_until", &(unix_now() + secs).to_string()),
+            Action::Snooze(None) => save_setting("notify_snooze_until", "0"),
+            Action::Mute(c) => {
+                let cats: Vec<&str> = notify_settings().notify_categories.iter().filter(|x| **x != c).map(|x| x.name()).collect();
+                save_setting("notify_categories", &cats.join(","));
+            }
+        }
+    }
+
+    /// Hands a `netscope://` URL to the running instance's tray window; `false` when there
+    /// is none (or it is elevated and this process is not).
+    fn forward_action(url: &str) -> bool {
+        let mut data = url.as_bytes().to_vec();
+        let cds = COPYDATASTRUCT { dwData: COPYDATA_ACTION, cbData: data.len() as u32, lpData: data.as_mut_ptr().cast() };
+        // SAFETY: the structure and its buffer outlive the synchronous SendMessageW call.
+        unsafe {
+            let other = FindWindowW(wide(TRAY_CLASS).as_ptr(), null());
+            !other.is_null() && SendMessageW(other, WM_COPYDATA, 0, &cds as *const COPYDATASTRUCT as LPARAM) != 0
+        }
+    }
+
+    /// Puts a glyph next to a menu item (by command id, or by position for submenus).
+    fn set_menu_icon(menu: HMENU, item: u32, by_position: bool, g: char, px: i32) {
+        match icons::menu_bitmap(g, px) {
+            Ok(h) => {
+                // SAFETY: an all-zero MENUITEMINFOW with the size and the one field set is valid.
+                unsafe {
+                    let mut mi: MENUITEMINFOW = std::mem::zeroed();
+                    mi.cbSize = std::mem::size_of::<MENUITEMINFOW>() as u32;
+                    mi.fMask = MIIM_BITMAP;
+                    mi.hbmpItem = h;
+                    SetMenuItemInfoW(menu, item, i32::from(by_position), &mi);
+                }
+            }
+            Err(e) => warn_once(&format!("menu icons unavailable: {e}")),
+        }
+    }
+
     fn show_menu(hwnd: HWND) {
         let checked = |on: bool| if on { MF_CHECKED } else { 0 };
+        let s = notify_settings();
+        let now = unix_now();
+        let ru = shared().russian;
+        let snoozed = s.notify_snooze_until > now;
         // SAFETY: standard popup-menu sequence; every handle is checked and destroyed.
         unsafe {
+            let px = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()).max(16);
             let menu = CreatePopupMenu();
             if menu.is_null() {
                 return;
             }
-            AppendMenuW(menu, MF_STRING, ID_OPEN, wide(&text("open")).as_ptr());
+            let item = |menu: HMENU, flags: u32, id: usize, label: &str, g: Option<char>| {
+                AppendMenuW(menu, MF_STRING | flags, id, wide(label).as_ptr());
+                if let Some(g) = g {
+                    set_menu_icon(menu, id as u32, false, g, px);
+                }
+            };
+            item(menu, 0, ID_OPEN, &text("open"), Some(glyph::OPEN_WINDOW));
             SetMenuDefaultItem(menu, ID_OPEN as u32, 0);
-            AppendMenuW(menu, MF_STRING, ID_BROWSER, wide(&text("browser")).as_ptr());
+            item(menu, 0, ID_BROWSER, &text("browser"), Some(glyph::GLOBE));
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
-            AppendMenuW(menu, MF_STRING | checked(notify_level() != "off"), ID_NOTIFY, wide(&text("notify")).as_ptr());
-            AppendMenuW(menu, MF_STRING | checked(autostart_enabled()), ID_AUTOSTART, wide(&text("autostart")).as_ptr());
-            if !shared().geoip_present {
-                AppendMenuW(menu, MF_STRING, ID_GEOIP, wide(&text("geoip")).as_ptr());
+
+            // Notifications: level, categories, quiet hour.
+            let sub = CreatePopupMenu();
+            if !sub.is_null() {
+                item(sub, 0, ID_NOTIFY_MEDIUM, &text("level_medium"), None);
+                item(sub, 0, ID_NOTIFY_HIGH, &text("level_high"), None);
+                item(sub, 0, ID_NOTIFY_OFF, &text("level_off"), None);
+                let level = match s.notifications.as_str() {
+                    "off" => ID_NOTIFY_OFF,
+                    "high" => ID_NOTIFY_HIGH,
+                    _ => ID_NOTIFY_MEDIUM,
+                };
+                CheckMenuRadioItem(sub, ID_NOTIFY_MEDIUM as u32, ID_NOTIFY_OFF as u32, level as u32, MF_BYCOMMAND);
+                AppendMenuW(sub, MF_SEPARATOR, 0, null());
+                for (i, c) in Category::ALL.iter().enumerate() {
+                    let g = match c {
+                        Category::Security => glyph::SHIELD,
+                        Category::Novelty => glyph::EYE,
+                        Category::Network => glyph::NETWORK,
+                        Category::Routes => glyph::MAP_PIN,
+                    };
+                    item(sub, checked(s.notify_categories.contains(c)), ID_CAT_BASE + i, category_label(*c, ru), Some(g));
+                }
+                AppendMenuW(sub, MF_SEPARATOR, 0, null());
+                let snooze_label = if snoozed { text("snoozed").replace("{t}", &clock(s.notify_snooze_until)) } else { text("snooze") };
+                item(sub, checked(snoozed), ID_SNOOZE, &snooze_label, Some(glyph::QUIET));
+                AppendMenuW(menu, MF_POPUP | MF_STRING, sub as usize, wide(&text("notify")).as_ptr());
+                let bell = if s.notifications == "off" || snoozed { glyph::BELL_OFF } else { glyph::BELL };
+                set_menu_icon(menu, 3, true, bell, px);
             }
-            AppendMenuW(menu, MF_STRING, ID_LOG, wide(&text("log")).as_ptr());
+
+            item(menu, checked(autostart_enabled()), ID_AUTOSTART, &text("autostart"), Some(glyph::STARTUP));
+            if !shared().geoip_present {
+                item(menu, 0, ID_GEOIP, &text("geoip"), Some(glyph::DOWNLOAD));
+            }
+            item(menu, 0, ID_LOG, &text("log"), Some(glyph::DOCUMENT));
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
-            AppendMenuW(menu, MF_STRING, ID_QUIT, wide(&text("quit")).as_ptr());
+            item(menu, 0, ID_QUIT, &text("quit"), Some(glyph::POWER));
             let mut pt = std::mem::zeroed();
             GetCursorPos(&mut pt);
             // Without this the menu does not close when the user clicks elsewhere.
             SetForegroundWindow(hwnd);
             let cmd = TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, 0, hwnd, null());
+            // Destroying the menu destroys its submenus too.
             DestroyMenu(menu);
             PostMessageW(hwnd, 0, 0, 0);
             if cmd > 0 {
@@ -479,11 +791,28 @@ mod win {
         match id {
             ID_OPEN => show_main(),
             ID_BROWSER => open_url(&dashboard_url()),
-            ID_NOTIFY => {
-                let level = if notify_level() == "off" { "medium" } else { "off" };
-                if let Err(e) = settings::write_setting(&shared().ini(), "notifications", level) {
-                    tracing::warn!("cannot save the notification level: {e}");
+            ID_NOTIFY_MEDIUM => save_setting("notifications", "medium"),
+            ID_NOTIFY_HIGH => save_setting("notifications", "high"),
+            ID_NOTIFY_OFF => save_setting("notifications", "off"),
+            ID_SNOOZE => {
+                let s = notify_settings();
+                if s.notify_snooze_until > unix_now() {
+                    run_action("netscope://unsnooze");
+                } else {
+                    run_action("netscope://snooze");
                 }
+            }
+            id if (ID_CAT_BASE..ID_CAT_BASE + Category::ALL.len()).contains(&id) => {
+                let c = Category::ALL[id - ID_CAT_BASE];
+                let mut cats = notify_settings().notify_categories;
+                if cats.contains(&c) {
+                    cats.retain(|x| *x != c);
+                } else {
+                    cats.push(c);
+                    cats.sort_by_key(|x| Category::ALL.iter().position(|y| y == x));
+                }
+                let names: Vec<&str> = cats.iter().map(|x| x.name()).collect();
+                save_setting("notify_categories", &names.join(","));
             }
             ID_AUTOSTART => {
                 if let Err(e) = set_autostart(!autostart_enabled()) {
@@ -632,7 +961,7 @@ mod win {
                     let mut shown = lock(&shared().hidden_hint_shown);
                     if !*shown {
                         *shown = true;
-                        balloon(&text("hidden_title"), &text("hidden"), NIIF_INFO);
+                        notify(&text("hidden_title"), &text("hidden"), NIIF_INFO);
                     }
                 }
                 0
@@ -708,7 +1037,7 @@ mod win {
         let old = fs::read_to_string(&url_file).unwrap_or_default();
         let _ = fs::write(&url_file, &url);
         shared().poller_reset.store(true, Ordering::SeqCst);
-        balloon(&text("restarted_title"), &text("restarted").replace("{url}", &url), NIIF_INFO);
+        notify(&text("restarted_title"), &text("restarted").replace("{url}", &url), NIIF_INFO);
         let hwnd = *lock(&shared().main_hwnd) as HWND;
         if hwnd.is_null() {
             if old.trim() != url && !quiet() {
@@ -742,13 +1071,13 @@ mod win {
     fn on_ready() {
         let url = dashboard_url();
         let _ = fs::write(shared().dir.join("dashboard.url"), &url);
-        balloon(&text("ready_title"), &text("ready").replace("{url}", &url), NIIF_INFO);
+        notify(&text("ready_title"), &text("ready").replace("{url}", &url), NIIF_INFO);
         let quiet = quiet();
         match webview::runtime_version() {
             Ok(v) => tracing::info!("WebView2 runtime {v}"),
             Err(e) => {
                 tracing::warn!("{e}; using the default browser");
-                balloon("NetScope", &text("no_webview").replace("{e}", &e), NIIF_WARNING);
+                notify("NetScope", &text("no_webview").replace("{e}", &e), NIIF_WARNING);
                 if !quiet {
                     open_url(&url);
                 }
@@ -789,38 +1118,26 @@ mod win {
         head.starts_with("HTTP/1.1 200").then(|| body.to_string())
     }
 
-    /// `(id, severity, kind, message)` of every alert in an `/api/alerts` body, newest first.
-    fn parse_alerts(body: &str) -> Vec<(u64, String, String, String)> {
+    /// The alerts of an `/api/alerts` body, newest first; entries that do not parse (a
+    /// kind this build does not know) are skipped.
+    fn parse_alerts(body: &str) -> Vec<Alert> {
         let v: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
-        v["alerts"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| {
-                        Some((
-                            x["id"].as_u64()?,
-                            x["severity"].as_str()?.to_string(),
-                            x["kind"].as_str()?.to_string(),
-                            x["message"].as_str().unwrap_or("").to_string(),
-                        ))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        v["alerts"].as_array().map(|a| a.iter().filter_map(|x| serde_json::from_value::<Alert>(x.clone()).ok()).collect()).unwrap_or_default()
     }
 
-    fn wanted(level: &str, severity: &str) -> bool {
+    /// Whether the notification level lets an alert of `severity` through.
+    fn wanted(level: &str, severity: Severity) -> bool {
         match level {
-            "high" => severity == "high",
-            "medium" => severity == "high" || severity == "medium",
+            "high" => severity == Severity::High,
+            "medium" => severity >= Severity::Medium,
             "all" | "low" => true,
             _ => false,
         }
     }
 
-    /// Polls the alert list and posts new high/medium alerts to the tray window. The level
-    /// comes from the settings file each time; after a restart the dashboard (and its alert
-    /// ids) start over, so the poller does too.
+    /// Polls the alert list and posts the new alerts the settings ask for (level, category,
+    /// quiet hour) to the tray window, oldest first. The settings come from the file each
+    /// time; after a restart the dashboard (and its alert ids) start over, so the poller does too.
     fn spawn_alert_poller() {
         std::thread::Builder::new()
             .name("alert-notify".into())
@@ -837,24 +1154,24 @@ mod win {
                     let Some(addr) = *lock(&shared().addr) else { continue };
                     let Some(body) = http_get(local_addr(addr), "/api/alerts") else { continue };
                     let alerts = parse_alerts(&body);
-                    let newest = alerts.iter().map(|a| a.0).max();
+                    let newest = alerts.iter().map(|a| a.id).max();
                     let Some(last) = seen else {
                         // Alerts from before the poller started are already on the dashboard.
                         seen = Some(newest.unwrap_or(0));
                         continue;
                     };
-                    let level = notify_level();
-                    for (id, severity, kind, message) in alerts.iter().rev() {
-                        if *id > last && wanted(&level, severity) {
-                            let payload = Box::new((text(&format!("kind_{kind}")), message.clone(), severity == "high"));
-                            let hwnd = *lock(&shared().tray_hwnd) as HWND;
-                            let raw = Box::into_raw(payload);
-                            // SAFETY: the window procedure reclaims the box (WM_ALERT); when the
-                            // message cannot be posted (window gone, queue full) it is ours again.
-                            unsafe {
-                                if PostMessageW(hwnd, WM_ALERT, 0, raw as LPARAM) == 0 {
-                                    drop(Box::from_raw(raw));
-                                }
+                    let s = notify_settings();
+                    let now = unix_now();
+                    let fresh: Vec<Alert> =
+                        alerts.into_iter().rev().filter(|a| a.id > last && wanted(&s.notifications, a.severity) && s.notifies(a.category, now)).collect();
+                    if !fresh.is_empty() {
+                        let hwnd = *lock(&shared().tray_hwnd) as HWND;
+                        let raw = Box::into_raw(Box::new(fresh));
+                        // SAFETY: the window procedure reclaims the box (WM_ALERT); when the
+                        // message cannot be posted (window gone, queue full) it is ours again.
+                        unsafe {
+                            if PostMessageW(hwnd, WM_ALERT, 0, raw as LPARAM) == 0 {
+                                drop(Box::from_raw(raw));
                             }
                         }
                     }
@@ -888,14 +1205,29 @@ mod win {
                 } else {
                     on_ready();
                     spawn_alert_poller();
+                    if let Some(url) = lock(&shared().pending_action).take() {
+                        run_action(&url);
+                    }
                 }
                 0
             }
             WM_ALERT => {
                 // SAFETY: posted by `spawn_alert_poller` with a leaked Box of this type.
-                let (title, body, high) = *Box::from_raw(lparam as *mut (String, String, bool));
-                balloon(&title, &body, if high { NIIF_ERROR } else { NIIF_WARNING });
+                let alerts = *Box::from_raw(lparam as *mut Vec<Alert>);
+                notify_alerts(alerts);
                 0
+            }
+            WM_COPYDATA => {
+                // A second instance forwards a `netscope://` action (toast click, protocol start).
+                let cds = lparam as *const COPYDATASTRUCT;
+                if cds.is_null() || (*cds).dwData != COPYDATA_ACTION || (*cds).lpData.is_null() || (*cds).cbData > 4096 {
+                    return 0;
+                }
+                // SAFETY: the sender's buffer stays valid for the duration of the synchronous message.
+                let bytes = std::slice::from_raw_parts((*cds).lpData as *const u8, (*cds).cbData as usize);
+                let url = String::from_utf8_lossy(bytes).into_owned();
+                run_action(&url);
+                1
             }
             WM_FAILED => {
                 let err = lock(&shared().error).clone().unwrap_or_default();
@@ -922,6 +1254,10 @@ mod win {
     pub fn main() {
         let dir = app::data_dir();
         let _ = fs::create_dir_all(&dir);
+        // A `netscope://…` argument (toast click, URL protocol) is an action, not a setting.
+        let all_args: Vec<String> = std::env::args().collect();
+        let action = all_args.iter().skip(1).find(|a| a.starts_with(&format!("{}:", toast::SCHEME))).cloned();
+        let real: Vec<String> = all_args.into_iter().filter(|a| !a.starts_with(&format!("{}:", toast::SCHEME))).collect();
         // SAFETY: a named mutex only; the handle is intentionally leaked for the process lifetime.
         let already_running = unsafe {
             let h = CreateMutexW(null(), 1, wide("Local\\NetScope.app").as_ptr());
@@ -930,6 +1266,15 @@ mod win {
             h.is_null() || GetLastError() == ERROR_ALREADY_EXISTS
         };
         if already_running {
+            if let Some(url) = &action {
+                if forward_action(url) {
+                    return;
+                }
+                // The running instance cannot be reached (elevated?): a plain open is still useful.
+                if !matches!(parse_action(url), Some(Action::Open(_))) {
+                    return;
+                }
+            }
             // Second launch: bring the running instance's window up (or its dashboard). The
             // post fails when the other instance is elevated and this one is not (UIPI).
             // SAFETY: plain window lookup and message post.
@@ -943,6 +1288,18 @@ mod win {
             }
             return;
         }
+        // Toasts need an application id with a name and an icon, and clicks need the URL
+        // protocol; both are (re)registered for this user on every start.
+        let icon = dir.join("netscope.ico");
+        let ico = include_bytes!("../../../assets/netscope.ico");
+        if fs::metadata(&icon).map_or(true, |m| m.len() != ico.len() as u64) {
+            let _ = fs::write(&icon, ico);
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Err(e) = toast::register(&exe, &icon) {
+                tracing::warn!("notification registration: {e}");
+            }
+        }
         // SAFETY: process-wide one-time initialisation before any window or COM call.
         unsafe {
             SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -951,7 +1308,6 @@ mod win {
         // SAFETY: plain query of the UI language.
         let russian = unsafe { GetUserDefaultUILanguage() } & 0x3ff == 0x19;
         let ini = dir.join(settings::FILE_NAME);
-        let real: Vec<String> = std::env::args().collect();
         let quiet_start = !Settings::load(&ini).show_window;
         let _ = SHARED.set(Shared {
             addr: Mutex::new(None),
@@ -969,6 +1325,7 @@ mod win {
             from_cli: real.len() > 1,
             ready_once: AtomicBool::new(false),
             poller_reset: AtomicBool::new(false),
+            pending_action: Mutex::new(action),
         });
         let args = match args(&real, &ini) {
             Ok(a) => a,
@@ -987,7 +1344,7 @@ mod win {
         // the whole process.
         let tray = unsafe {
             let module = GetModuleHandleW(null());
-            let class = wide("NetScopeTray");
+            let class = wide(TRAY_CLASS);
             let mut wc: WNDCLASSW = std::mem::zeroed();
             wc.lpfnWndProc = Some(tray_wndproc);
             wc.hInstance = module;
@@ -1125,36 +1482,60 @@ mod win {
             assert_eq!(local_addr(p("192.168.1.5:80")), p("192.168.1.5:80"));
         }
 
+        const ALERT: &str = r#"{"id":7,"ts":1,"severity":"high","kind":"volume_spike","category":"security","host":"1.2.3.4","name":null,"message":"spike","details":{"rate":"5000000","baseline":"10"}}"#;
+
         #[test]
         fn alerts_with_missing_fields_are_skipped() {
-            let body = r#"{"alerts":[
-                {"id":1,"severity":"high","kind":"k"},
-                {"severity":"high","kind":"k","message":"no id"},
-                {"id":2,"kind":"k","message":"no severity"},
-                {"id":3,"severity":"low","message":"no kind"},
-                {"id":"4","severity":"low","kind":"k","message":"string id"},
-                {"id":5,"severity":"low","kind":"k","message":null},
+            let body = format!(
+                r#"{{"alerts":[
+                {ALERT},
+                {{"id":1,"ts":1,"severity":"high","kind":"not_a_kind","category":"security","host":null,"name":null,"message":"m","details":{{}}}},
+                {{"ts":1,"severity":"high","kind":"new_process","category":"novelty","host":null,"name":null,"message":"no id","details":{{}}}},
+                {{"id":2,"ts":1,"severity":"loud","kind":"new_process","category":"novelty","host":null,"name":null,"message":"bad severity","details":{{}}}},
+                {{"id":5,"ts":1,"severity":"low","kind":"new_process","category":"novelty","host":null,"name":null,"message":"ok","details":{{"process":"x.exe"}}}},
                 null, 7, "x", []
-            ]}"#;
-            let a = parse_alerts(body);
-            assert_eq!(a.iter().map(|x| x.0).collect::<Vec<_>>(), vec![1, 5]);
-            assert_eq!((a[0].3.as_str(), a[1].3.as_str()), ("", ""), "a missing or null message is empty");
-            for empty in [r#"{"alerts":null}"#, r#"{"alerts":{}}"#, r#"{"alerts":"x"}"#, "[]", "", "null", r#"{"counts":{}}"#, "{\"alerts\":[]}"] {
+            ]}}"#
+            );
+            let a = parse_alerts(&body);
+            assert_eq!(a.iter().map(|x| x.id).collect::<Vec<_>>(), vec![7, 5]);
+            assert_eq!((a[0].kind, a[0].category, a[1].details["process"].as_str()), (netscope::analytics::AlertKind::VolumeSpike, Category::Security, "x.exe"));
+            for empty in [r#"{"alerts":null}"#, r#"{"alerts":{}}"#, r#"{"alerts":"x"}"#, "[]", "", "null", r#"{"counts":{}}"#, "{\"alerts\":[]}", "garbage"] {
                 assert!(parse_alerts(empty).is_empty(), "{empty}");
             }
-            assert!(wanted("all", "low") && wanted("low", "medium") && wanted("low", "high"));
-            assert!(!wanted("ALL", "high") && !wanted("", "high") && !wanted("medium", "") && !wanted("high", "HIGH"), "levels and severities are compared verbatim");
         }
 
         #[test]
-        fn alerts_are_parsed_and_filtered() {
-            let body = r#"{"counts":{},"alerts":[{"id":7,"severity":"high","kind":"volume_spike","message":"spike"},{"id":6,"severity":"low","kind":"cleartext_protocol","message":"telnet"},{"id":5,"severity":"medium","kind":"new_country"}]}"#;
-            let a = parse_alerts(body);
-            assert_eq!(a.len(), 3);
-            assert_eq!((a[0].0, a[0].1.as_str(), a[2].3.as_str()), (7, "high", ""));
-            assert!(wanted("medium", "high") && wanted("medium", "medium") && !wanted("medium", "low"));
-            assert!(wanted("high", "high") && !wanted("high", "medium") && !wanted("off", "high"));
-            assert!(parse_alerts("garbage").is_empty());
+        fn levels_filter_by_severity() {
+            assert!(wanted("all", Severity::Low) && wanted("low", Severity::Medium) && wanted("low", Severity::High));
+            assert!(wanted("medium", Severity::High) && wanted("medium", Severity::Medium) && !wanted("medium", Severity::Low));
+            assert!(wanted("high", Severity::High) && !wanted("high", Severity::Medium));
+            assert!(!wanted("off", Severity::High) && !wanted("ALL", Severity::High) && !wanted("", Severity::High), "levels are compared verbatim");
+        }
+
+        #[test]
+        fn alert_toast_texts_come_from_the_shared_templates() {
+            let a = parse_alerts(&format!(r#"{{"alerts":[{ALERT}]}}"#)).remove(0);
+            assert_eq!(kind_label(a.kind, true), "Всплеск трафика");
+            assert!(alert_text(&a, false).starts_with("Traffic spike to unknown host 1.2.3.4: 4.8 MB/s"));
+            assert_eq!(category_label(a.category, false), "Security");
+        }
+
+        #[test]
+        fn actions_are_parsed_strictly() {
+            assert_eq!(parse_action("netscope://open"), Some(Action::Open(None)));
+            assert_eq!(parse_action("netscope://open/"), Some(Action::Open(None)));
+            assert_eq!(parse_action("netscope://open/alerts"), Some(Action::Open(Some("#/alerts".into()))));
+            assert_eq!(parse_action("netscope://open/conn/42"), Some(Action::Open(Some("#/conn/42".into()))));
+            assert_eq!(parse_action("netscope://open/<script>"), None, "only route characters");
+            assert_eq!(parse_action("netscope://snooze"), Some(Action::Snooze(Some(SNOOZE_SECS))));
+            assert_eq!(parse_action("netscope://snooze/15"), Some(Action::Snooze(Some(900))));
+            assert_eq!(parse_action("netscope://snooze/0"), None);
+            assert_eq!(parse_action("netscope://snooze/100000"), None);
+            assert_eq!(parse_action("netscope://unsnooze"), Some(Action::Snooze(None)));
+            assert_eq!(parse_action("netscope://mute/novelty"), Some(Action::Mute(Category::Novelty)));
+            assert_eq!(parse_action("netscope://mute/everything"), None);
+            assert_eq!(parse_action("http://open"), None);
+            assert_eq!(parse_action("netscope://quit"), None);
         }
     }
 }

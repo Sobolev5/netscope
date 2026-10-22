@@ -11,11 +11,12 @@ pub mod persist;
 mod snapshot;
 mod state;
 pub mod stream;
+pub mod text;
 pub mod views;
 
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-pub use anomaly::{Alert, AlertCounts, AlertKind, Severity};
+pub use anomaly::{Alert, AlertCounts, AlertKind, Category, Severity};
 pub use journal::Journal;
 pub use persist::{NoveltyBaseline, Persisted, WatchEntry};
 pub use snapshot::{DnsView, HostView, ProtoView, Rates, Snapshot};

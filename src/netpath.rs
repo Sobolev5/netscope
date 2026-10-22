@@ -3,7 +3,7 @@
 //! VPN client processes, and traffic per destination country.
 
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -107,21 +107,168 @@ fn check_host(host: &str) -> Result<Egress, String> {
     Ok(e)
 }
 
-/// Re-checks the egress address every 10 minutes until `stop`.
-pub fn spawn_egress_checker(shared: SharedState, stop: Arc<AtomicBool>) -> std::io::Result<JoinHandle<()>> {
-    thread::Builder::new().name("egress".into()).spawn(move || {
-        let mut last: Option<Instant> = None;
+/// The adapter carrying the default route right now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteInfo {
+    /// The local address packets to the internet leave from.
+    pub ip: IpAddr,
+    /// Adapter name as Windows shows it ("Wi-Fi", "Ethernet 2", "WireGuard Tunnel"); `None`
+    /// where the OS does not tell.
+    pub adapter: Option<String>,
+    /// A virtual tunnel adapter (VPN) carries the route.
+    pub tunnel: bool,
+}
+
+impl RouteInfo {
+    /// What to show: the adapter name, else the address.
+    pub fn label(&self) -> String {
+        self.adapter.clone().unwrap_or_else(|| self.ip.to_string())
+    }
+}
+
+/// Where traffic to the internet leaves from, as the routing table says now.
+pub fn current_route() -> Option<RouteInfo> {
+    let ip = crate::capture::live::default_route_ip()?;
+    let (adapter, virtual_type) = adapter_of(ip).unwrap_or((None, false));
+    let tunnel = virtual_type || adapter.as_deref().is_some_and(is_tunnel_adapter);
+    Some(RouteInfo { ip, adapter, tunnel })
+}
+
+/// `(friendly name, is a tunnel/virtual interface type)` of the adapter holding `ip`.
+#[cfg(windows)]
+fn adapter_of(ip: IpAddr) -> Option<(Option<String>, bool)> {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use windows_sys::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR};
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetAdaptersAddresses, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IF_TYPE_PPP, IF_TYPE_PROP_VIRTUAL,
+        IF_TYPE_TUNNEL, IP_ADAPTER_ADDRESSES_LH,
+    };
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6};
+
+    let flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    let mut size: u32 = 16 * 1024;
+    let mut buf: Vec<u64> = Vec::new();
+    // SAFETY: the buffer is sized by the call itself; every pointer read below comes from
+    // the linked list the call filled in and is checked for null first.
+    unsafe {
+        let mut ok = false;
+        for _ in 0..4 {
+            buf.resize((size as usize).div_ceil(8), 0);
+            let r = GetAdaptersAddresses(AF_UNSPEC as u32, flags, std::ptr::null(), buf.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>(), &mut size);
+            if r == NO_ERROR {
+                ok = true;
+                break;
+            }
+            if r != ERROR_BUFFER_OVERFLOW {
+                return None;
+            }
+        }
+        if !ok {
+            return None;
+        }
+        let mut a = buf.as_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        while !a.is_null() {
+            let adapter = &*a;
+            let mut u = adapter.FirstUnicastAddress;
+            while !u.is_null() {
+                let sa = (*u).Address.lpSockaddr;
+                let found = if sa.is_null() {
+                    None
+                } else {
+                    match (*sa).sa_family {
+                        AF_INET => Some(IpAddr::V4(Ipv4Addr::from((*sa.cast::<SOCKADDR_IN>()).sin_addr.S_un.S_addr.to_ne_bytes()))),
+                        AF_INET6 => Some(IpAddr::V6(Ipv6Addr::from((*sa.cast::<SOCKADDR_IN6>()).sin6_addr.u.Byte))),
+                        _ => None,
+                    }
+                };
+                if found == Some(ip) {
+                    let name = wide_string(adapter.FriendlyName);
+                    let desc = wide_string(adapter.Description);
+                    let virtual_type = matches!(adapter.IfType, IF_TYPE_TUNNEL | IF_TYPE_PROP_VIRTUAL | IF_TYPE_PPP) || is_tunnel_adapter(&desc);
+                    return Some((if name.is_empty() { None } else { Some(name) }, virtual_type));
+                }
+                u = (*u).Next;
+            }
+            a = adapter.Next;
+        }
+    }
+    None
+}
+
+/// Copies a NUL-terminated UTF-16 string from the OS.
+///
+/// # Safety
+/// `p` is null or points to a NUL-terminated UTF-16 string.
+#[cfg(windows)]
+unsafe fn wide_string(p: *const u16) -> String {
+    if p.is_null() {
+        return String::new();
+    }
+    let mut n = 0;
+    // SAFETY: as documented above; the loop stops at the terminator.
+    unsafe {
+        while *p.add(n) != 0 {
+            n += 1;
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(p, n))
+    }
+}
+
+#[cfg(not(windows))]
+fn adapter_of(_ip: IpAddr) -> Option<(Option<String>, bool)> {
+    None
+}
+
+/// How often the routing table is looked at.
+const ROUTE_POLL: Duration = Duration::from_secs(2);
+/// A route change is followed by an egress check after this long (VPNs settle), repeated
+/// a few times when the check fails (the tunnel may still be connecting).
+const SETTLE: Duration = Duration::from_secs(3);
+const RETRY: Duration = Duration::from_secs(5);
+const RETRIES: u32 = 4;
+
+/// Watches the default route (every 2 s, nothing is sent) and, with `check_egress`, the
+/// public egress address: every 10 minutes and a few seconds after each route change.
+/// Both go to the state, which raises the network alerts.
+pub fn spawn_network_watcher(shared: SharedState, stop: Arc<AtomicBool>, egress_enabled: bool) -> std::io::Result<JoinHandle<()>> {
+    thread::Builder::new().name("network".into()).spawn(move || {
+        let mut last_check: Option<Instant> = None;
+        let mut last_route_poll: Option<Instant> = None;
+        let mut route: Option<RouteInfo> = None;
+        // (when, attempts left) of an egress check scheduled after a route change.
+        let mut pending: Option<(Instant, u32)> = None;
         while !stop.load(Ordering::Relaxed) {
-            if last.is_none_or(|t| t.elapsed() >= RECHECK) {
+            if last_route_poll.is_none_or(|t| t.elapsed() >= ROUTE_POLL) {
+                last_route_poll = Some(Instant::now());
+                let now = current_route();
+                if now != route {
+                    tracing::info!("default route: {}", now.as_ref().map_or_else(|| "none".to_string(), RouteInfo::label));
+                    let first = route.is_none();
+                    route = now.clone();
+                    shared.write().set_default_route(now);
+                    if !first && egress_enabled {
+                        pending = Some((Instant::now() + SETTLE, RETRIES));
+                    }
+                }
+            }
+            let due_periodic = egress_enabled && last_check.is_none_or(|t| t.elapsed() >= RECHECK);
+            let due_pending = pending.is_some_and(|(at, _)| Instant::now() >= at);
+            if due_periodic || due_pending {
                 let r = check_egress(&stop);
                 if stop.load(Ordering::Relaxed) {
                     return;
                 }
+                let failed = r.is_err();
                 if let Err(e) = &r {
                     tracing::warn!("egress check: {e}");
                 }
                 shared.write().set_egress(r);
-                last = Some(Instant::now());
+                last_check = Some(Instant::now());
+                pending = match pending {
+                    Some((_, left)) if failed && left > 1 => Some((Instant::now() + RETRY, left - 1)),
+                    _ => None,
+                };
             }
             thread::sleep(Duration::from_millis(200));
         }

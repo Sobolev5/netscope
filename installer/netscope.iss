@@ -6,6 +6,9 @@
 ;   /DGeoIPDir=<dir with dbip-*.mmdb>                        — geolocation databases, embedded
 ;   /DSuffix=-full                                           — output file name suffix
 ; Npcap cannot be embedded (its license forbids redistribution): it is downloaded at install time.
+; Windows notifications (toasts) need an application id on the Start-menu shortcut and the
+; `netscope:` URL protocol for clicks; both are registered here (and again by the program on
+; every start, so a portable run works too).
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -104,6 +107,7 @@ Name: "egress"; Description: "{cm:TaskEgress}"; GroupDescription: "{#AppName}:"
 Source: "{#BinDir}\netscope-app.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BinDir}\netscope.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\webview2\WebView2Loader.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\netscope.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\webview2\LICENSE.txt"; DestDir: "{app}"; DestName: "LICENSE-WebView2Loader.txt"; Flags: ignoreversion
 Source: "..\scripts\fetch-geoip.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -126,15 +130,25 @@ Name: "{localappdata}\NetScope\geoip"; Check: not IsAdminInstallMode
 Name: "{commonappdata}\NetScope\geoip"; Check: IsAdminInstallMode
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\netscope-app.exe"; Comment: "Network traffic analyzer"
+Name: "{group}\{#AppName}"; Filename: "{app}\netscope-app.exe"; Comment: "Network traffic analyzer"; AppUserModelID: "NetScope.Desktop"
 Name: "{group}\{#AppName} (console)"; Filename: "{app}\netscope.exe"; Parameters: "--open"; Comment: "NetScope with a console window"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\netscope-app.exe"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\netscope-app.exe"; Tasks: desktopicon; AppUserModelID: "NetScope.Desktop"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "NetScope"; ValueData: """{app}\netscope-app.exe"""; Flags: uninsdeletevalue; Tasks: autostart
 ; An entry the user enabled from the tray menu survives upgrades but is removed on uninstall.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "NetScope"; Flags: uninsdeletevalue dontcreatekey
+; Toast notifications: the application id's name and icon (the program points IconUri at its
+; own copy of the icon on start; this one makes a fresh install complete before the first run).
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\NetScope.Desktop"; ValueType: string; ValueName: "DisplayName"; ValueData: "NetScope"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\NetScope.Desktop"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\netscope.ico"; Flags: uninsdeletekey
+; The netscope: URL protocol: a click on a toast (or one of its buttons) starts
+; "netscope-app.exe netscope://open/alerts", which hands the action to the running instance.
+Root: HKCU; Subkey: "Software\Classes\netscope"; ValueType: string; ValueData: "URL:NetScope"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\netscope"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\netscope\DefaultIcon"; ValueType: string; ValueData: """{app}\netscope-app.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\netscope\shell\open\command"; ValueType: string; ValueData: """{app}\netscope-app.exe"" ""%1"""
 
 [Run]
 ; Geolocation data goes to the per-user data folder, where the program looks for it.
@@ -152,6 +166,8 @@ Filename: "{cmd}"; Parameters: "/C taskkill /IM netscope-app.exe /F & taskkill /
 Type: files; Name: "{localappdata}\NetScope\netscope.log"
 Type: files; Name: "{localappdata}\NetScope\netscope.log.1"
 Type: files; Name: "{localappdata}\NetScope\dashboard.url"
+Type: files; Name: "{localappdata}\NetScope\netscope.ico"
+Type: filesandordirs; Name: "{localappdata}\NetScope\icons"
 Type: filesandordirs; Name: "{localappdata}\NetScope\WebView2"
 
 [Code]
