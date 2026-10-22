@@ -42,6 +42,20 @@
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
   .seg button { padding: 2px 9px; font-size: 12px; background: #fff; border: 0; cursor: pointer; color: var(--muted); }
   .seg button.on { background: var(--accent); color: #fff; }
+  /* Filter bars: drop-downs, toggle chips, chosen values; values in tables that filter by themselves. */
+  .fbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line2); }
+  .fchips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line2); background: #fafbfd; }
+  .fsel { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 3px 6px; font-size: 12px; color: #374151; max-width: 230px; cursor: pointer; }
+  .fsel:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px #dbeafe; }
+  .fsel.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .fchip { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 2px 10px; font-size: 12px; color: #374151; cursor: pointer; white-space: nowrap; }
+  .fchip:hover { background: #f6f8fc; }
+  .fchip.on { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .fval { border: 1px solid #bfdbfe; background: var(--accent-soft); border-radius: 999px; padding: 1px 10px; font-size: 12px; color: #1e40af; cursor: pointer; white-space: nowrap; }
+  .fval:hover { background: #dbeafe; }
+  .fval b { font-weight: 600; }
+  .fadd { cursor: pointer; border-bottom: 1px dotted #a8b3c2; }
+  .fadd:hover { border-bottom-color: var(--accent); background: var(--accent-soft); }
   .pk td { padding: 2px 8px; border-bottom: 1px solid #fff; font-size: 12px; white-space: nowrap; }
   .pk tr { cursor: pointer; }
   .pk-http td { background: #e4ffc7; } .pk-tls td { background: #ebe9ff; } .pk-tcp td { background: #f3f2ff; }
@@ -218,6 +232,14 @@ const I18N = {
     alert_capture_failed: "Захват трафика остановился: {error}",
     cat_security: "Безопасность", cat_novelty: "Новое в сети", cat_network: "Сеть и VPN", cat_routes: "Маршруты",
     set_notify_cats: "О чём уведомлять", set_snoozed: "Уведомления отключены до {t}", set_unsnooze: "включить снова", set_notify_hint: "Уровень и категории действуют сразу; то же меню есть у значка в трее.",
+    fb_click: "щёлкните, чтобы отфильтровать", fb_remove: "убрать фильтр", fb_reset: "Сбросить фильтры", fb_any: "любая", fb_shown: "{n} из {t}", fb_found: "найдено {n}",
+    fb_country: "Страна", fb_org: "Провайдер", fb_process: "Программа", fb_proto: "Протокол", fb_scope: "Сеть", fb_scope_ext: "интернет", fb_scope_lan: "локальная сеть",
+    fb_active: "Активность", fb_now: "активна сейчас", fb_1m: "за минуту", fb_5m: "за 5 минут", fb_15m: "за 15 минут", fb_1h: "за час", fb_24h: "за сутки",
+    fb_rtt: "Задержка", fb_hide: "скрыть", fb_only: "только они", fb_flagged: "помеченные", fb_watched: "отслеживаемые", fb_traffic: "Трафик", fb_no_anycast: "без CDN/anycast",
+    fb_sig: "Подпись", fb_goes_to: "Ходит в страну", fb_temp: "запуск из Temp/Downloads", fb_exposed: "открыт наружу", fb_exposed_tip: "слушает не только на loopback: доступен из сети",
+    fb_category: "Категория", fb_kind: "Тип", fb_severity: "Уровень", fb_period: "Период", fb_rcode: "Результат", fb_pending: "без ответа", fb_transport: "Транспорт",
+    fb_slow: "Медленные", fb_hide_local: "без mDNS и .local", fb_dir: "Направление", fb_reason: "Причина", fb_open: "открытые", fb_unsigned: "неподписанные",
+    programs: "Программы", proc_ph: "программа или путь…", alert_ph: "поиск по тексту…", map_here: "В этой точке", map_n_hosts: "{n} хостов",
   },
   en: {
     connecting: "connecting…", starting: "starting", live: "● live", replay: "replaying", finished: "finished", failed: "capture failed",
@@ -318,6 +340,14 @@ const I18N = {
     alert_capture_failed: "Traffic capture stopped: {error}",
     cat_security: "Security", cat_novelty: "New activity", cat_network: "Network and VPN", cat_routes: "Routes",
     set_notify_cats: "Notify about", set_snoozed: "Notifications are muted until {t}", set_unsnooze: "unmute", set_notify_hint: "The level and the categories apply at once; the tray icon's menu has the same switches.",
+    fb_click: "click to filter by this", fb_remove: "remove the filter", fb_reset: "Clear filters", fb_any: "any", fb_shown: "{n} of {t}", fb_found: "{n} found",
+    fb_country: "Country", fb_org: "Provider", fb_process: "Program", fb_proto: "Protocol", fb_scope: "Network", fb_scope_ext: "internet", fb_scope_lan: "local network",
+    fb_active: "Activity", fb_now: "active now", fb_1m: "last minute", fb_5m: "last 5 minutes", fb_15m: "last 15 minutes", fb_1h: "last hour", fb_24h: "last day",
+    fb_rtt: "Latency", fb_hide: "hide", fb_only: "only", fb_flagged: "flagged", fb_watched: "watched", fb_traffic: "Traffic", fb_no_anycast: "no CDN/anycast",
+    fb_sig: "Signature", fb_goes_to: "Talks to country", fb_temp: "runs from Temp/Downloads", fb_exposed: "reachable", fb_exposed_tip: "listens beyond loopback: reachable from the network",
+    fb_category: "Category", fb_kind: "Type", fb_severity: "Severity", fb_period: "Period", fb_rcode: "Result", fb_pending: "no answer", fb_transport: "Transport",
+    fb_slow: "Slow", fb_hide_local: "no mDNS and .local", fb_dir: "Direction", fb_reason: "Reason", fb_open: "open", fb_unsigned: "unsigned",
+    programs: "Programs", proc_ph: "program or path…", alert_ph: "search the text…", map_here: "At this point", map_n_hosts: "{n} hosts",
   },
 };
 
@@ -445,12 +475,387 @@ async function getJson(url, method) {
   return r.json();
 }
 
+// ================= filter bars and map layout: pure logic =================
+// BEGIN PURE: no DOM, no globals; tests/ui_logic.rs runs tests/js/ui_logic.test.js on this block.
+//
+// A filter bar is a list of definitions over table rows:
+//   { id, kind: "multi", get(row) -> value | [values] }   any of the chosen values
+//   { id, kind: "pick", options: [{ v, test(row) }] }       one choice, e.g. "active in 5 min"
+//   { id, kind: "flag", test(row) }                         on/off, e.g. "unsigned only"
+// Its state is { [id]: [values] | "choice" | true }; a missing or empty entry means "any".
+
+const facetVals = (x) => (Array.isArray(x) ? x : x === null || x === undefined || x === "" ? [] : [x]).map(String);
+const facetOn = (st, id) => { const v = st && st[id]; return Array.isArray(v) ? v.length > 0 : !!v; };
+
+/** The row passes every filter of `st` except the one on `skip`. */
+function facetMatch(st, defs, row, skip) {
+  for (const d of defs) {
+    if (d.id === skip || !facetOn(st, d.id)) continue;
+    const want = st[d.id];
+    if (d.kind === "multi") {
+      const have = facetVals(d.get(row)).map((v) => v.toLowerCase());
+      if (!want.some((w) => have.includes(String(w).toLowerCase()))) return false;
+    } else if (d.kind === "pick") {
+      const o = d.options.find((x) => x.v === want);
+      if (o && !o.test(row)) return false;
+    } else if (d.kind === "flag" && !d.test(row)) return false;
+  }
+  return true;
+}
+
+const facetFilter = (st, defs, rows) => rows.filter((r) => facetMatch(st, defs, r));
+
+/** Values of a multi filter with counts over the rows the other filters let through, the
+ *  most frequent first; chosen values stay listed (count 0) so they can be removed. */
+function facetOptions(st, defs, rows, id) {
+  const d = defs.find((x) => x.id === id);
+  const counts = new Map();
+  for (const r of rows) {
+    if (!facetMatch(st, defs, r, id)) continue;
+    for (const v of new Set(facetVals(d.get(r)))) counts.set(v, (counts.get(v) || 0) + 1);
+  }
+  for (const v of (st && Array.isArray(st[id]) ? st[id] : [])) if (![...counts.keys()].some((k) => k.toLowerCase() === String(v).toLowerCase())) counts.set(String(v), 0);
+  return [...counts.entries()].map(([v, n]) => ({ v, n })).sort((a, b) => b.n - a.n || (a.v < b.v ? -1 : a.v > b.v ? 1 : 0));
+}
+
+/** Adds or removes one value of a multi filter; returns the new state (the old one is kept). */
+function facetToggle(st, id, v) {
+  const cur = Array.isArray(st[id]) ? st[id] : [];
+  const has = cur.some((x) => String(x).toLowerCase() === String(v).toLowerCase());
+  const next = has ? cur.filter((x) => String(x).toLowerCase() !== String(v).toLowerCase()) : cur.concat([v]);
+  const out = { ...st };
+  if (next.length) out[id] = next; else delete out[id];
+  return out;
+}
+
+const facetCount = (st) => Object.keys(st || {}).filter((k) => facetOn(st, k)).length;
+
+/** URL form of a state (`f=` parameter): only the active filters, as JSON. */
+function facetEncode(st) {
+  const out = {};
+  for (const k of Object.keys(st || {}).sort()) if (facetOn(st, k)) out[k] = st[k];
+  return Object.keys(out).length ? JSON.stringify(out) : "";
+}
+
+/** The state back from a URL (anything malformed is dropped, never thrown). */
+function facetDecode(s) {
+  let o;
+  try { o = JSON.parse(s); } catch (e) { return {}; }
+  if (!o || typeof o !== "object" || Array.isArray(o)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (!/^[a-z][a-z_]{0,23}$/.test(k)) continue; // also keeps out __proto__
+    if (Array.isArray(v)) { const vals = v.filter((x) => typeof x === "string" || typeof x === "number").map(String).slice(0, 50); if (vals.length) out[k] = vals; }
+    else if (typeof v === "string" && v) out[k] = v.slice(0, 40);
+    else if (v === true) out[k] = true;
+  }
+  return out;
+}
+
+/** A filter-language clause for a value (the connection filter): strings quoted. */
+function filterClause(field, op, v) {
+  if (typeof v === "number" || /^\d+(\.\d+)?$/.test(String(v))) return `${field} ${op} ${v}`;
+  return `${field} ${op} "${String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/** Appends a clause to a query with `and`, unless the query already holds exactly it. */
+function addClause(q, clause) {
+  const cur = (q || "").trim();
+  if (!cur) return clause;
+  if (hasClause(cur, clause)) return cur;
+  return `${cur} and ${clause}`;
+}
+
+const clauses = (q) => ((q || "").trim() ? q.trim().split(/\s+and\s+/i).map((c) => c.trim()) : []);
+const hasClause = (q, clause) => clauses(q).includes(clause);
+/** Removes the clause when the query holds it, adds it otherwise. */
+const toggleClause = (q, clause) => (hasClause(q, clause) ? clauses(q).filter((c) => c !== clause).join(" and ") : addClause(q, clause));
+
+/** Points in about the same place (one city) become one cluster: summed weight, the
+ *  heaviest item first. `prec` is the coordinate rounding in degrees. */
+function clusterPoints(items, prec = 0.25) {
+  const groups = new Map();
+  for (const it of items) {
+    const key = `${Math.round(it.lat / prec)},${Math.round(it.lon / prec)}`;
+    let g = groups.get(key);
+    if (!g) { g = { key, lat: 0, lon: 0, weight: 0, items: [] }; groups.set(key, g); }
+    g.items.push(it); g.weight += it.weight || 0;
+  }
+  for (const g of groups.values()) {
+    g.items.sort((a, b) => (b.weight || 0) - (a.weight || 0));
+    // The heaviest item's own coordinates (a real city), not an average in the sea.
+    g.lat = g.items[0].lat; g.lon = g.items[0].lon;
+  }
+  return [...groups.values()].sort((a, b) => b.weight - a.weight);
+}
+
+/** Places labels without overlaps. Items: { id, x, y, r, w, h, prio, always }, in map
+ *  units at the current zoom; each tries right, left, above and below its dot and is
+ *  dropped when all four collide with a placed label or a dot, or lie outside `view`
+ *  ({x, y, w, h}); `always` labels are placed first and never dropped. `max` limits
+ *  the labels that are not `always`. Returns
+ *  { id: {x, y} } (the top-left corner) for the labels to show. */
+function placeLabels(items, view, max = Infinity) {
+  const boxes = [];
+  const dots = items.map((it) => ({ x: it.x - it.r, y: it.y - it.r, w: 2 * it.r, h: 2 * it.r, id: it.id }));
+  const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const inside = (b) => b.x >= view.x && b.y >= view.y && b.x + b.w <= view.x + view.w && b.y + b.h <= view.y + view.h;
+  const order = items.slice().sort((a, b) => (b.always ? 1 : 0) - (a.always ? 1 : 0) || b.prio - a.prio);
+  const out = {};
+  let shown = 0;
+  for (const it of order) {
+    if (!it.always && shown >= max) continue;
+    const g = it.r * 0.4 + it.h * 0.15;
+    const cand = [
+      { x: it.x + it.r + g, y: it.y - it.h / 2 },
+      { x: it.x - it.r - g - it.w, y: it.y - it.h / 2 },
+      { x: it.x - it.w / 2, y: it.y - it.r - g - it.h },
+      { x: it.x - it.w / 2, y: it.y + it.r + g },
+    ];
+    for (const c of cand) {
+      const b = { x: c.x, y: c.y, w: it.w, h: it.h };
+      if (!inside(b) || boxes.some((o) => hit(o, b)) || dots.some((d) => d.id !== it.id && hit(d, b))) continue;
+      boxes.push(b); out[it.id] = { x: c.x, y: c.y };
+      if (!it.always) shown++;
+      break;
+    }
+    // The exit and VPN labels are always shown: to the right, whatever they cover.
+    if (it.always && !out[it.id]) { const c = cand[0]; boxes.push({ x: c.x, y: c.y, w: it.w, h: it.h }); out[it.id] = { x: c.x, y: c.y }; }
+  }
+  return out;
+}
+// END PURE
+
+// ================= filter bars =================
+// Each list view has its own filters (ui.facets[key]); they are remembered across reloads
+// and mirrored in the address (`f=`), so a filtered view can be bookmarked or sent.
+// Values in tables with a dotted underline add themselves as a filter when clicked.
+
+/** Country names by code, learned from the geo records seen (for option labels). */
+const COUNTRY_GEO = new Map();
+function learnCountries(geos) { for (const g of geos) if (g && g.country_code && !COUNTRY_GEO.has(g.country_code)) COUNTRY_GEO.set(g.country_code, g); }
+function countryLabel(code) { const g = COUNTRY_GEO.get(code); const n = g && gName(g, "country"); return n ? `${code} · ${n}` : String(code); }
+
+/** The filter key of the current view (`null`: the view has no filter bar). */
+function facetKey() {
+  if (["processes", "hosts", "map", "dns", "sockets", "alerts"].includes(route.name)) return route.name;
+  if (route.name === "journal" && ui.journal.kind !== "log") return "journal:" + ui.journal.kind;
+  return null;
+}
+const facetState = (key) => ui.facets[key] || {};
+
+function setFacets(key, st) {
+  if (facetCount(st)) ui.facets[key] = st; else delete ui.facets[key];
+  store.set("facets", ui.facets);
+  syncFacetUrl();
+  if (key === "dns") refreshDns();
+  else if (key.startsWith("journal:")) refreshJournal();
+  renderView();
+}
+
+/** Writes the current view's filters into the address without a navigation. */
+function syncFacetUrl() {
+  const key = facetKey();
+  if (!key) return;
+  const params = { ...route.params };
+  delete params.f;
+  if (route.name === "journal") params.kind = ui.journal.kind;
+  const f = facetEncode(facetState(key));
+  if (f) params.f = f;
+  route.params = params;
+  const qs = new URLSearchParams(params).toString();
+  const hash = "#/" + route.name + (qs ? "?" + qs : "");
+  if (location.hash !== hash) history.replaceState(null, "", hash);
+}
+
+/** Filters given in the address replace the remembered ones of that view. */
+function facetsFromUrl() {
+  if (route.params.f === undefined) return;
+  const key = route.name === "journal" ? "journal:" + (route.params.kind || ui.journal.kind) : route.name;
+  const st = facetDecode(route.params.f);
+  if (facetCount(st)) ui.facets[key] = st; else delete ui.facets[key];
+  store.set("facets", ui.facets);
+}
+
+/** Adds a clicked table value as a filter of the current view. */
+function addFacetValue(field, v) {
+  if (route.name === "connections") {
+    const f = { proto: "app" }[field] || field;
+    setConnQuery(addClause(ui.connQuery, filterClause(f, "==", v)));
+    return;
+  }
+  const key = facetKey();
+  if (!key) return;
+  const st = facetState(key);
+  if ((st[field] || []).some((x) => String(x).toLowerCase() === String(v).toLowerCase())) return;
+  setFacets(key, facetToggle(st, field, v));
+}
+
+/** A table value that filters by itself when clicked. */
+const fcell = (field, v, html) => (v === null || v === undefined || v === "" ? html : `<span class="fadd" data-fadd="${field}" data-v="${esc(v)}" title="${esc(t("fb_click"))}">${html}</span>`);
+
+/** The bar: one drop-down per multi filter (values with counts), drop-downs for choices,
+ *  toggle chips, then the chosen values as removable chips. `server` lists come from the
+ *  API (`{field: [[value, count]]}`) when the filtering happens there. */
+function facetBar(key, defs, rows, server, lead = "") {
+  const st = facetState(key);
+  const parts = [];
+  for (const d of defs) {
+    if (d.kind === "multi") {
+      const chosen = new Set((st[d.id] || []).map((x) => String(x).toLowerCase()));
+      const all = server ? (server[d.id] || []).map(([v, n]) => ({ v: String(v), n })) : facetOptions(st, defs, rows, d.id);
+      const list = all.filter((o) => o.v !== "" && !chosen.has(o.v.toLowerCase())).slice(0, 80);
+      if (!list.length) continue;
+      parts.push(`<select class="fsel" data-fv="${key}" data-fmulti="${d.id}" aria-label="${esc(d.label)}"><option value="">${esc(d.label)}</option>${list.map((o) => `<option value="${esc(o.v)}">${esc(d.opt ? d.opt(o.v) : o.v)} · ${fmtNum(o.n)}</option>`).join("")}</select>`);
+    } else if (d.kind === "pick") {
+      const cur = st[d.id] || "";
+      parts.push(`<select class="fsel ${cur ? "on" : ""}" data-fv="${key}" data-fpick="${d.id}" aria-label="${esc(d.label)}"><option value="">${esc(d.label)}: ${t("fb_any")}</option>${d.options.map((o) => `<option value="${esc(o.v)}"${o.v === cur ? " selected" : ""}>${esc(d.label)}: ${esc(o.label)}</option>`).join("")}</select>`);
+    } else if (d.kind === "flag") {
+      parts.push(`<button type="button" class="fchip ${st[d.id] ? "on" : ""}" data-fv="${key}" data-fflag="${d.id}" aria-pressed="${st[d.id] ? "true" : "false"}">${esc(d.label)}</button>`);
+    }
+  }
+  const chips = defs.filter((d) => d.kind === "multi").flatMap((d) => (st[d.id] || []).map((v) => `<button type="button" class="fval" data-fv="${key}" data-fdel="${d.id}" data-v="${esc(v)}" title="${esc(t("fb_remove"))}">${esc(d.label)}: <b>${esc(d.opt ? d.opt(v) : v)}</b> ✕</button>`));
+  const reset = facetCount(st) ? `<button type="button" class="btn" data-fv="${key}" data-freset="1">${t("fb_reset")}</button>` : "";
+  return `<div class="fbar">${lead}${parts.join("")}${reset}</div>${chips.length ? `<div class="fchips">${chips.join("")}</div>` : ""}`;
+}
+
+/** "N of M" for a panel title when filters hide rows. */
+const shownOf = (n, total) => (n === total ? fmtNum(n) : t("fb_shown", { n: fmtNum(n), t: fmtNum(total) }));
+
+function activityDef(lastSec, now) {
+  return { id: "active", kind: "pick", label: t("fb_active"), options: [[60, "fb_1m"], [300, "fb_5m"], [3600, "fb_1h"]].map(([sec, k]) => ({ v: String(sec), label: t(k), test: (r) => now - lastSec(r) <= sec })) };
+}
+const anycastOf = (h) => !!(h.geo && h.geo.anycast);
+
+function hostDefs(s) {
+  const watched = new Set((ui.watch ? ui.watch.targets : []).map((x) => x.ip));
+  return [
+    { id: "country", kind: "multi", label: t("fb_country"), get: (h) => h.geo && h.geo.country_code, opt: countryLabel },
+    { id: "org", kind: "multi", label: t("fb_org"), get: (h) => h.geo && h.geo.org },
+    { id: "process", kind: "multi", label: t("fb_process"), get: (h) => h.processes },
+    { id: "proto", kind: "multi", label: t("fb_proto"), get: (h) => h.protocols },
+    { id: "scope", kind: "pick", label: t("fb_scope"), options: [{ v: "ext", label: t("fb_scope_ext"), test: (h) => h.scope !== "local" }, { v: "lan", label: t("fb_scope_lan"), test: (h) => h.scope === "local" }] },
+    activityDef((h) => h.last_seen, s.now),
+    { id: "rtt", kind: "pick", label: t("fb_rtt"), options: [100, 250].map((ms) => ({ v: String(ms), label: `> ${ms} ${t("ms")}`, test: (h) => h.rtt_ms > ms })) },
+    { id: "anycast", kind: "pick", label: "CDN/anycast", options: [{ v: "hide", label: t("fb_hide"), test: (h) => !anycastOf(h) }, { v: "only", label: t("fb_only"), test: anycastOf }] },
+    { id: "flagged", kind: "flag", label: "⚠ " + t("fb_flagged"), test: (h) => h.flagged },
+    { id: "watched", kind: "flag", label: t("fb_watched"), test: (h) => watched.has(h.ip) },
+  ];
+}
+
+function mapDefs(s) {
+  const total = (h) => h.bytes_in + h.bytes_out;
+  return [
+    { id: "country", kind: "multi", label: t("fb_country"), get: (h) => h.geo && h.geo.country_code, opt: countryLabel },
+    { id: "process", kind: "multi", label: t("fb_process"), get: (h) => h.processes },
+    { id: "proto", kind: "multi", label: t("fb_proto"), get: (h) => h.protocols },
+    { id: "org", kind: "multi", label: t("fb_org"), get: (h) => h.geo && h.geo.org },
+    activityDef((h) => h.last_seen, s.now),
+    { id: "traffic", kind: "pick", label: t("fb_traffic"), options: [1, 10, 100].map((mb) => ({ v: String(mb), label: `> ${fmtBytes(mb * 1048576)}`, test: (h) => total(h) > mb * 1048576 })) },
+    { id: "anycast", kind: "flag", label: t("fb_no_anycast"), test: (h) => !anycastOf(h) },
+  ];
+}
+
+/** Countries each program reached (from the hosts list): the process list's country filter. */
+function processCountries(s) {
+  const m = new Map();
+  for (const h of s.hosts) for (const p of h.processes || []) if (h.geo && h.geo.country_code) { if (!m.has(p)) m.set(p, new Set()); m.get(p).add(h.geo.country_code); }
+  return m;
+}
+
+function processDefs(s) {
+  const pc = processCountries(s);
+  const sig = (g) => (g.sig && g.sig.signature ? g.sig.signature.status : "pending");
+  return [
+    { id: "sig", kind: "multi", label: t("fb_sig"), get: sig, opt: (v) => t("sig_" + v) },
+    { id: "proto", kind: "multi", label: t("fb_proto"), get: (g) => [...g.protocols] },
+    { id: "country", kind: "multi", label: t("fb_goes_to"), get: (g) => [...(pc.get(g.name) || [])], opt: countryLabel },
+    { id: "active", kind: "pick", label: t("fb_active"), options: [{ v: "now", label: t("fb_now"), test: (g) => g.active > 0 }].concat([[300, "fb_5m"], [3600, "fb_1h"]].map(([sec, k]) => ({ v: String(sec), label: t(k), test: (g) => s.now - Math.floor(g.last_us / 1e6) <= sec }))) },
+    { id: "temp", kind: "flag", label: t("fb_temp"), test: (g) => g.items.some((p) => p.suspicious_path) },
+  ];
+}
+
+const isLoopback = (addr) => /^127\.|^\[?::1\]?(:|$)/.test(addr || "");
+const portOf = (addr) => Number(String(addr || "").split(":").pop());
+/** Reachable from the network: a TCP listener, or a UDP socket on a fixed (non-ephemeral)
+ *  port, on an address other than loopback. A program's own UDP client sockets sit on
+ *  ephemeral ports (49152+) and are not services. */
+const isExposed = (x) => !isLoopback(x.local) && (x.state === "LISTEN" || (/^udp/i.test(x.proto) && !x.remote && portOf(x.local) > 0 && portOf(x.local) < 49152));
+
+function socketDefs() {
+  return [
+    { id: "proto", kind: "multi", label: t("fb_proto"), get: (x) => String(x.proto).toLowerCase() },
+    { id: "state", kind: "multi", label: t("state"), get: (x) => x.state },
+    { id: "process", kind: "multi", label: t("fb_process"), get: (x) => x.process },
+    { id: "exposed", kind: "flag", label: t("fb_exposed"), test: isExposed },
+  ];
+}
+
+function alertDefs(s) {
+  return [
+    { id: "category", kind: "multi", label: t("fb_category"), get: (a) => a.category, opt: (v) => t("cat_" + v) },
+    { id: "kind", kind: "multi", label: t("fb_kind"), get: (a) => a.kind, opt: (v) => t("kind_" + v) },
+    { id: "process", kind: "multi", label: t("fb_process"), get: (a) => a.details && a.details.process },
+    { id: "host", kind: "multi", label: t("host"), get: (a) => a.host },
+    { id: "period", kind: "pick", label: t("fb_period"), options: [[900, "fb_15m"], [3600, "fb_1h"], [86400, "fb_24h"]].map(([sec, k]) => ({ v: String(sec), label: t(k), test: (a) => s.now - a.ts <= sec })) },
+  ];
+}
+
+/** DNS and journal filters run on the server: only labels here (the lists come with the data). */
+function dnsDefs() {
+  return [
+    { id: "rcode", kind: "multi", label: t("fb_rcode"), opt: (v) => (v === "pending" ? t("fb_pending") : v) },
+    { id: "qtype", kind: "multi", label: t("type") },
+    { id: "process", kind: "multi", label: t("fb_process") },
+    { id: "resolver", kind: "multi", label: t("resolver") },
+    { id: "transport", kind: "multi", label: t("fb_transport") },
+    { id: "slow", kind: "pick", label: t("fb_slow"), options: [100, 500].map((ms) => ({ v: String(ms), label: `> ${ms} ${t("ms")}`, test: () => true })) },
+    { id: "hide_local", kind: "flag", label: t("fb_hide_local"), test: () => true },
+  ];
+}
+
+function journalDefs(kind) {
+  const L = {
+    process: [t("fb_process")], app: [t("fb_proto")], country: [t("fb_country"), countryLabel], org: [t("fb_org")],
+    dir: [t("fb_dir"), (v) => t(v === "out" ? "dir_out" : "dir_in")], reason: [t("fb_reason"), (v) => { const k = "j_reason_" + v, s = t(k); return s === k ? v : s; }],
+    rcode: [t("fb_rcode"), (v) => (v === "pending" ? t("fb_pending") : v)], qtype: [t("type")], resolver: [t("resolver")], transport: [t("fb_transport")],
+    severity: [t("fb_severity"), (v) => t("sev_" + v)], category: [t("fb_category"), (v) => t("cat_" + v)], kind: [t("fb_kind"), (v) => t("kind_" + v)], host: [t("host")],
+  };
+  const ids = { connections: ["process", "app", "country", "org", "dir", "reason"], dns: ["rcode", "qtype", "process", "resolver", "transport"], alerts: ["severity", "category", "kind", "process", "host"] }[kind] || [];
+  return ids.map((id) => ({ id, kind: "multi", label: L[id][0], opt: L[id][1] }));
+}
+
+/** The value lists a server-side filter sends (`f=`): multi filters only. */
+function serverFacets(st, defs) {
+  const out = {};
+  for (const d of defs) if (d.kind === "multi" && Array.isArray(st[d.id]) && st[d.id].length) out[d.id] = st[d.id];
+  return Object.keys(out).length ? JSON.stringify(out) : "";
+}
+
+/** Quick filters of the connection list: each choice adds a clause to the query. */
+function connQuickBar(rows) {
+  const count = (get) => { const m = new Map(); for (const c of rows) { const v = get(c); if (v) m.set(v, (m.get(v) || 0) + 1); } return [...m.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 80); };
+  const sel = (label, field, get, opt) => {
+    const list = count(get);
+    if (!list.length) return "";
+    return `<select class="fsel" data-fq="1" aria-label="${esc(label)}"><option value="">${esc(label)}</option>${list.map(([v, n]) => `<option value="${esc(filterClause(field, "==", v))}">${esc(opt ? opt(v) : v)} · ${fmtNum(n)}</option>`).join("")}</select>`;
+  };
+  const pick = (label, opts) => `<select class="fsel" data-fq="1" aria-label="${esc(label)}"><option value="">${esc(label)}</option>${opts.map(([clause, l]) => `<option value="${esc(clause)}">${esc(l)}</option>`).join("")}</select>`;
+  const chipq = (clause, label) => `<button type="button" class="fchip ${hasClause(ui.connQuery, clause) ? "on" : ""}" data-fclause="${esc(clause)}">${esc(label)}</button>`;
+  return `<div class="fbar">${sel(t("fb_process"), "process", (c) => c.process && c.process.name)}${sel(t("fb_proto"), "app", (c) => c.app)}${sel(t("fb_country"), "country", (c) => c.geo && c.geo.country_code, countryLabel)}${sel(t("fb_org"), "org", (c) => c.geo && c.geo.org)}
+    ${pick(t("fb_dir"), [["dir == out", t("dir_out")], ["dir == in", t("dir_in")]])}${pick(t("fb_active"), [["idle < 1m", t("fb_1m")], ["idle < 5m", t("fb_5m")], ["idle < 1h", t("fb_1h")]])}
+    ${chipq("state != closed", t("fb_open"))}${chipq("signed == false", t("fb_unsigned"))}${chipq("not lan", t("fb_scope_ext"))}${chipq("lan", t("fb_scope_lan"))}${chipq("doh", "DoH/DoT")}
+    ${ui.connQuery.trim() ? `<button type="button" class="btn" data-fclear="1">${t("fb_reset")}</button>` : ""}</div>`;
+}
+
 // ================= state & routing =================
 
 let last = null;
 let route = { name: "overview", params: {} };
 const ui = {
-  expanded: new Set(), connQuery: store.get("connQuery", ""), connError: null, hostQuery: "", sockQuery: "", dnsQuery: "", alertFilter: "all",
+  expanded: new Set(), connQuery: store.get("connQuery", ""), connError: null, hostQuery: "", sockQuery: "", dnsQuery: "", alertFilter: "all", procQuery: "", alertQuery: "",
+  // Filter bars: chosen values per view (see facetKey); the map's opened cluster.
+  facets: store.get("facets", {}), mapCluster: null,
   detail: null, detailTab: "packets", selected: null, packet: null, stream: null, hexAll: false, help: false,
   traces: {}, tracing: {}, routeIp: "", watch: null, dnsData: null, fields: [],
   notify: store.get("notify", false), notifiedUpTo: null,
@@ -477,6 +882,7 @@ window.addEventListener("hashchange", () => {
   if (route.name !== "conn" || prev.params.id !== route.params.id) Object.assign(ui, { detail: null, selected: null, packet: null, stream: null, detailTab: "packets", hexAll: false });
   if (route.name === "route" && route.params.ip) ui.routeIp = route.params.ip;
   if (route.name === "connections" && route.params.q !== undefined) { ui.connQuery = route.params.q; store.set("connQuery", ui.connQuery); }
+  facetsFromUrl();
   renderView(true);
 });
 
@@ -619,7 +1025,10 @@ function groupProcesses(list) {
 
 function viewProcesses(s) {
   const pv = s.processes;
-  const list = groupProcesses(pv.processes);
+  const all = groupProcesses(pv.processes);
+  const defs = processDefs(s), q = ui.procQuery.trim().toLowerCase();
+  learnCountries(s.hosts.map((h) => h.geo));
+  const list = facetFilter(facetState("processes"), defs, all).filter((g) => !q || g.name.toLowerCase().includes(q) || (g.path || "").toLowerCase().includes(q));
   const max = Math.max(1, ...list.map((g) => g.bytes_in + g.bytes_out));
   let rows = "";
   for (const g of list) {
@@ -630,8 +1039,8 @@ function viewProcesses(s) {
       <td class="max-w-[360px]"><div class="flex items-center gap-2"><span class="w-3 text-slate-400">${single ? "" : open ? "▾" : "▸"}</span>
         <div class="min-w-0"><div class="truncate"><span class="font-semibold">${esc(g.name)}</span> ${single ? `<span class="num text-[11px] text-slate-400">pid ${single.pid}</span>` : `<span class="text-[11px] text-slate-400">${t("n_procs", { n: g.items.length })}</span>`}</div>
         <div class="mono truncate text-[11px] text-slate-400" title="${esc(g.path)}">${esc(g.path || t("path_na"))}</div></div></div></td>
-      <td class="max-w-[220px] truncate">${sigBadge(g.sig)}</td>
-      <td>${[...g.protocols].map(chip).join(" ")}</td>
+      <td class="max-w-[220px] truncate">${fcell("sig", g.sig.signature ? g.sig.signature.status : "pending", sigBadge(g.sig))}</td>
+      <td>${[...g.protocols].map((p) => fcell("proto", p, chip(p))).join(" ")}</td>
       <td class="max-w-[260px] truncate text-slate-600">${remotes || "—"}</td>
       <td class="r num">${fmtNum(g.active)} <span class="text-slate-400">/ ${fmtNum(g.total)}</span></td>
       <td class="r num text-sky-700">${fmtBytes(g.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(g.bytes_out)}</td>
@@ -648,15 +1057,16 @@ function viewProcesses(s) {
       }
     }
   }
-  if (pv.unattributed.connections) {
+  if (pv.unattributed.connections && !facetCount(facetState("processes")) && !q) {
     rows += `<tr class="clickable" data-pid="0"><td colspan="4" class="text-slate-500">${t("no_proc_row")} <span class="text-[11px] text-slate-400">${t("no_proc_hint")}</span></td>
       <td class="r num">${fmtNum(pv.unattributed.connections)}</td><td class="r num text-sky-700">${fmtBytes(pv.unattributed.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(pv.unattributed.bytes_out)}</td><td></td><td></td></tr>`;
   }
   const note = !pv.attribution_enabled ? `<div class="border-b border-[#e3e6eb] bg-slate-50 px-4 py-2 text-slate-500">${t("attr_file")}</div>`
     : pv.attribution_error ? `<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-amber-800">${t("attr_partial", { e: esc(pv.attribution_error) })}</div>` : "";
-  return kpis(s) + panel(`${t("processes")} <span class="sub">· ${t("proc_hint")}</span>`, `${note}<div class="scroll max-h-[70vh]"><table class="grid-table">
+  const fbar = facetBar("processes", defs, all, null, `<input id="proc-q" type="search" class="input w-56" value="${esc(ui.procQuery)}" placeholder="${esc(t("proc_ph"))}" autocomplete="off">`);
+  return kpis(s) + panel(`${t("processes")} <span class="sub">· ${shownOf(list.length, all.length)} · ${t("proc_hint")}</span>`, `${fbar}${note}<div class="scroll max-h-[70vh]"><table class="grid-table">
     <thead><tr><th>${t("program")}</th><th>${t("signature")}</th><th>${t("protocols")}</th><th>${t("goes_to")}</th><th class="r">${t("connections")}</th><th class="r">${t("received")}</th><th class="r">${t("sent")}</th><th>${t("share")}</th><th class="r">${t("activity")}</th></tr></thead>
-    <tbody>${rows || empty(9, t("no_attr_yet"))}</tbody></table></div>`, "", `<a class="btn" href="/api/export/processes.csv">${t("export_csv")}</a>`);
+    <tbody>${rows || empty(9, all.length ? t("nothing") : t("no_attr_yet"))}</tbody></table></div>`, "", `<a class="btn" href="/api/export/processes.csv">${t("export_csv")}</a>`);
 }
 
 // ================= connections =================
@@ -674,12 +1084,12 @@ function connRows(list, nowSec) {
     const unsigned = c.signed === false ? ` <span class="chip bg-red-100 text-red-800">${t("sig_unsigned")}</span>` : "";
     const doh = c.encrypted_dns ? ` <span class="chip bg-indigo-100 text-indigo-800">${c.encrypted_dns}</span>` : "";
     return `<tr class="clickable" data-conn="${c.id}">
-      <td class="max-w-[180px] truncate">${procLabel(c.process)}${unsigned}</td>
-      <td class="whitespace-nowrap">${chip(c.app)} <span class="text-[10px] uppercase text-slate-400">${esc(c.l4)}</span>${doh}</td>
+      <td class="max-w-[180px] truncate">${fcell("process", c.process && c.process.name, procLabel(c.process))}${unsigned}</td>
+      <td class="whitespace-nowrap">${fcell("app", c.app, chip(c.app))} <span class="text-[10px] uppercase text-slate-400">${esc(c.l4)}</span>${doh}</td>
       <td class="mono whitespace-nowrap text-[12px] text-slate-500">${esc(c.local)}</td>
       <td class="max-w-[240px]"><div class="truncate font-medium">${esc(c.name || c.remote_ip)}</div><div class="mono truncate text-[11px] text-slate-500">${esc(c.remote)}</div></td>
-      <td class="whitespace-nowrap">${geoLine(c.geo)}</td>
-      <td class="max-w-[150px] truncate text-[12px] text-slate-600">${c.geo && c.geo.org ? esc(c.geo.org) : '<span class="text-slate-300">—</span>'}</td>
+      <td class="whitespace-nowrap">${fcell("country", c.geo && c.geo.country_code, geoLine(c.geo))}</td>
+      <td class="max-w-[150px] truncate text-[12px] text-slate-600">${c.geo && c.geo.org ? fcell("org", c.geo.org, esc(c.geo.org)) : '<span class="text-slate-300">—</span>'}</td>
       <td class="r">${numOr(c.hops)}</td><td class="r">${qualityCell(c)}</td>
       <td class="r">${retr ? `<span class="num text-amber-700">${retr}</span>` : '<span class="text-slate-300">0</span>'}</td>
       <td class="whitespace-nowrap text-[12px]">${stateLabel(c.state)}</td><td class="whitespace-nowrap text-[12px] text-slate-500">${init}</td>
@@ -709,7 +1119,8 @@ function viewConnections(s) {
   const pname = pid === "0" ? t("no_proc_row") : (s.processes.processes.find((p) => String(p.pid) === pid)?.name || "pid " + pid);
   const pidChip = pid !== undefined ? `<a href="#/connections" class="chip bg-blue-50 text-blue-700" style="text-transform:none;font-size:12px;line-height:22px;text-decoration:none">${t("proc_chip", { p: esc(pname) + (pid !== "0" ? " · " + esc(pid) : "") })} ✕</a>` : "";
   const err = ui.connError ? `<div class="border-b border-red-200 bg-red-50 px-4 py-1.5 text-[12px] text-red-700">${t("filter_error", { p: ui.connError.position + 1, m: esc(ui.connError.message) })}</div>` : "";
-  const tools = `<div class="flex flex-wrap items-center gap-2 border-b border-[#eef0f3] px-3 py-2">
+  if (data) learnCountries(data.connections.map((c) => c.geo));
+  const tools = `${connQuickBar(data ? data.connections : [])}<div class="flex flex-wrap items-center gap-2 border-b border-[#eef0f3] px-3 py-2">
       <input id="conn-q" class="input mono min-w-[300px] flex-1 ${ui.connError ? "bad" : ui.connQuery.trim() ? "good" : ""}" value="${esc(ui.connQuery)}" placeholder="${esc(t("filter_ph"))}" autocomplete="off" spellcheck="false">
       <button class="btn" id="help-btn">${t("filter_help")}</button>
       <a class="btn" href="/api/export/connections.csv?${connQs()}">${t("export_csv")}</a><a class="btn" href="/api/export/connections.pcap?${connQs()}">${t("export_pcap")}</a></div>`;
@@ -734,19 +1145,22 @@ async function refreshConnections() {
 
 function viewHosts(s) {
   const q = ui.hostQuery.trim().toLowerCase();
-  const list = s.hosts.filter((h) => !q || h.ip.includes(q) || (h.name || "").toLowerCase().includes(q) || JSON.stringify(h.geo || {}).toLowerCase().includes(q));
+  const defs = hostDefs(s);
+  learnCountries(s.hosts.map((h) => h.geo));
+  const list = facetFilter(facetState("hosts"), defs, s.hosts).filter((h) => !q || h.ip.includes(q) || (h.name || "").toLowerCase().includes(q) || JSON.stringify(h.geo || {}).toLowerCase().includes(q) || (h.processes || []).some((p) => p.toLowerCase().includes(q)));
   const top = Math.max(1, ...s.hosts.map((h) => h.bytes_in + h.bytes_out));
   const watched = new Set((ui.watch ? ui.watch.targets : []).map((x) => x.ip));
   const rows = list.map((h) => `<tr class="clickable" data-host="${esc(h.ip)}">
       <td class="max-w-[260px]"><div class="truncate font-medium">${h.flagged ? `<span class="text-red-600" title="${esc(t("spike_tip"))}">⚠</span> ` : ""}${esc(h.name || h.ip)}${h.name_source ? ` <span class="chip bg-slate-100 text-slate-500">${SOURCE[h.name_source] || esc(h.name_source)}</span>` : ""}</div><div class="mono text-[11px] text-slate-500">${esc(h.ip)}${h.scope === "local" ? " · " + t("lan") : ""}</div></td>
-      <td class="whitespace-nowrap">${geoLine(h.geo)}</td><td class="max-w-[200px] truncate text-[12px]">${orgLine(h.geo)}</td>
-      <td class="r">${numOr(h.hops)}</td><td class="r">${qualityCell(h)}</td><td>${h.protocols.map(chip).join(" ")}</td>
+      <td class="whitespace-nowrap">${fcell("country", h.geo && h.geo.country_code, geoLine(h.geo))}</td><td class="max-w-[200px] truncate text-[12px]">${fcell("org", h.geo && h.geo.org, orgLine(h.geo))}</td>
+      <td class="max-w-[140px] truncate text-[12px]">${(h.processes || []).slice(0, 3).map((p) => fcell("process", p, esc(p))).join(", ") || '<span class="text-slate-300">—</span>'}</td>
+      <td class="r">${numOr(h.hops)}</td><td class="r">${qualityCell(h)}</td><td>${h.protocols.map((p) => fcell("proto", p, chip(p))).join(" ")}</td>
       <td class="r num text-sky-700">${fmtBytes(h.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(h.bytes_out)}</td>
       <td class="w-20">${bar((h.bytes_in + h.bytes_out) / top)}</td><td class="r num text-slate-500">${ago(s.now, h.last_seen)}</td>
       <td class="r whitespace-nowrap">${h.scope === "local" ? "" : `<button class="btn" data-trace-goto="${esc(h.ip)}">${t("route_btn")}</button> ${watched.has(h.ip) ? `<span class="chip bg-emerald-50 text-emerald-700">${t("watching")}</span>` : `<button class="btn" data-watch-add="${esc(h.ip)}" data-label="${esc(h.name || "")}">${t("watch_btn")}</button>`}`}</td></tr>`).join("");
-  return panel(`${t("hosts")} <span class="sub">· ${fmtNum(list.length)} · ${t("hosts_hint")}</span>`, `<div class="scroll max-h-[78vh]"><table class="grid-table">
-      <thead><tr><th>${t("host")}</th><th>${t("where")}</th><th>${t("provider")}</th><th class="r" title="${esc(t("hops_tip"))}">${t("hops")}</th><th class="r" title="${esc(t("rtt_tip"))}">${t("rtt")}</th><th>${t("protocols")}</th><th class="r">↓</th><th class="r">↑</th><th>${t("share")}</th><th class="r">${t("act")}</th><th></th></tr></thead>
-      <tbody>${rows || empty(11, t("waiting"))}</tbody></table></div>`, "",
+  return panel(`${t("hosts")} <span class="sub">· ${shownOf(list.length, s.hosts.length)} · ${t("hosts_hint")}</span>`, `${facetBar("hosts", defs, s.hosts)}<div class="scroll max-h-[78vh]"><table class="grid-table">
+      <thead><tr><th>${t("host")}</th><th>${t("where")}</th><th>${t("provider")}</th><th>${t("programs")}</th><th class="r" title="${esc(t("hops_tip"))}">${t("hops")}</th><th class="r" title="${esc(t("rtt_tip"))}">${t("rtt")}</th><th>${t("protocols")}</th><th class="r">↓</th><th class="r">↑</th><th>${t("share")}</th><th class="r">${t("act")}</th><th></th></tr></thead>
+      <tbody>${rows || empty(12, s.hosts.length ? t("nothing") : t("waiting"))}</tbody></table></div>`, "",
     `<input id="host-q" type="search" class="input w-64" value="${esc(ui.hostQuery)}" placeholder="${esc(t("host_ph"))}" autocomplete="off"><a class="btn" href="/api/export/hosts.csv">${t("export_csv")}</a>`);
 }
 
@@ -783,7 +1197,9 @@ const hasCoords = (g) => g && g.lat !== null && g.lat !== undefined && g.lon !==
 // The viewport is an SVG viewBox kept in ui.mapViews[key] (null = whole world). Wheel,
 // drag, pinch, double-click and the +/−/⟲ buttons change it in place (applyMapView), so
 // the periodic re-render only has to draw the same viewport again.
-const MAP_MAX_ZOOM = 40, MAP_LABEL_ZOOM = 2.5;
+// Labels that are not "always" shown: this many per zoom step (×1 → 8, ×4 → 32…), the rest
+// only in tooltips; `placeLabels` drops the ones that would overlap.
+const MAP_MAX_ZOOM = 40, LABELS_PER_ZOOM = 8, MAX_LABELS = 150;
 let landPath = null;
 function worldPath() {
   // Rings crossing the antimeridian jump from +180 to -180: start a new subpath there
@@ -814,10 +1230,34 @@ function applyMapView(wrap) {
   svg.setAttribute("viewBox", `${v.x.toFixed(2)} ${v.y.toFixed(2)} ${v.w.toFixed(2)} ${v.h.toFixed(2)}`);
   // Dots shrink slower than the map grows, so they stay visible but stop covering cities.
   svg.querySelectorAll("circle[data-r]").forEach((c) => c.setAttribute("r", (Number(c.dataset.r) / Math.sqrt(k)).toFixed(2)));
-  svg.querySelectorAll(".map-label").forEach((l) => { l.setAttribute("font-size", (11 / k).toFixed(2)); l.style.display = k >= MAP_LABEL_ZOOM || l.dataset.always ? "" : "none"; });
+  layoutLabels(wrap);
   const z = wrap.querySelector(".map-zoom");
   if (z) z.textContent = "×" + (k < 10 ? k.toFixed(1) : k.toFixed(0));
 }
+/** Shows the labels of a rendered map that fit (see placeLabels) at its current zoom. Text
+ *  widths are measured once per render, at zoom ×1 units, and scaled afterwards. */
+function layoutLabels(wrap) {
+  const key = wrap.dataset.map, v = mapView(key), k = mapZoom(key), fs = 11 / k;
+  const items = [...wrap.querySelectorAll(".map-label")].map((el) => {
+    el.setAttribute("font-size", fs.toFixed(2));
+    if (!el.dataset.wu) {
+      el.style.display = "";
+      let len = 0;
+      try { len = el.getComputedTextLength(); } catch (e) { /* not rendered */ }
+      el.dataset.wu = String(len > 0 ? len * k : el.textContent.length * 6.4);
+    }
+    return { id: el.dataset.li, el, x: Number(el.dataset.lx), y: Number(el.dataset.ly), r: Number(el.dataset.lr) / Math.sqrt(k), w: Number(el.dataset.wu) / k, h: fs * 1.2, prio: Number(el.dataset.prio), always: !!el.dataset.always };
+  });
+  const placed = placeLabels(items, v, Math.round(LABELS_PER_ZOOM * k));
+  for (const it of items) {
+    const p = placed[it.id];
+    if (!p) { it.el.style.display = "none"; continue; }
+    it.el.style.display = "";
+    it.el.setAttribute("x", p.x.toFixed(2));
+    it.el.setAttribute("y", (p.y + it.h * 0.8).toFixed(2));
+  }
+}
+
 function worldSvg(points, lines, extra = "", key = "world") {
   const v = mapView(key), k = mapZoom(key);
   let grid = "";
@@ -825,9 +1265,9 @@ function worldSvg(points, lines, extra = "", key = "world") {
   for (let la = -60; la <= 60; la += 30) { const [, y] = proj(0, la); grid += `M0,${y.toFixed(1)}H${MAP_W}`; }
   const ln = lines.map(([a, b, color]) => { const [x1, y1] = proj(a.lon, a.lat), [x2, y2] = proj(b.lon, b.lat); return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="1" stroke-opacity=".35"/>`; }).join("");
   const pts = points.map((p) => { const [x, y] = proj(p.lon, p.lat); return `<circle class="map-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(Number(p.r) / Math.sqrt(k)).toFixed(2)}" data-r="${p.r}" fill="${p.color}" fill-opacity=".75" stroke="#fff" stroke-width="1" ${p.attr || ""}><title>${esc(p.title)}</title></circle>`; }).join("");
-  // Labels appear once zoomed in (the biggest 80 by dot size, to stay readable).
-  const labelled = points.filter((p) => p.label && p.always).concat(points.filter((p) => p.label && !p.always).sort((a, b) => Number(b.r) - Number(a.r)).slice(0, 80));
-  const labels = labelled.map((p) => { const [x, y] = proj(p.lon, p.lat); return `<text class="map-label" x="${(x + Number(p.r) / Math.sqrt(k) + 2 / k).toFixed(1)}" y="${(y + 4 / k).toFixed(1)}" font-size="${(11 / k).toFixed(2)}" ${p.always ? 'data-always="1"' : ""} style="${k >= MAP_LABEL_ZOOM || p.always ? "" : "display:none"}">${esc(p.label)}</text>`; }).join("");
+  // Labels are placed after rendering (layoutLabels): where they fit, the most important first.
+  const labelled = points.filter((p) => p.label && p.always).concat(points.filter((p) => p.label && !p.always).sort((a, b) => Number(b.prio ?? b.r) - Number(a.prio ?? a.r)).slice(0, MAX_LABELS));
+  const labels = labelled.map((p, i) => { const [x, y] = proj(p.lon, p.lat); return `<text class="map-label" data-li="${i}" data-lx="${x.toFixed(2)}" data-ly="${y.toFixed(2)}" data-lr="${p.r}" data-prio="${Number(p.prio ?? p.r)}" ${p.always ? 'data-always="1"' : ""} x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${(11 / k).toFixed(2)}" style="display:none">${esc(p.label)}</text>`; }).join("");
   const btn = (z, label, text) => `<button type="button" data-map-zoom="${z}" title="${esc(label)}" aria-label="${esc(label)}">${text}</button>`;
   return `<div class="map-wrap" data-map="${key}" title="${esc(t("map_drag_hint"))}"><svg class="map-svg" viewBox="${v.x.toFixed(2)} ${v.y.toFixed(2)} ${v.w.toFixed(2)} ${v.h.toFixed(2)}" preserveAspectRatio="xMidYMid meet" aria-label="map"><rect x="0" y="0" width="${MAP_W}" height="${MAP_H}" fill="#f8fafc"/><path class="map-grid" d="${grid}"/><path class="map-land" d="${worldPath()}"/>${ln}${extra}${pts}${labels}</svg>
     <div class="map-ctl">${btn("in", t("map_zoom_in"), "+")}${btn("out", t("map_zoom_out"), "−")}${btn("reset", t("map_reset"), "⟲")}</div><div class="map-zoom">×${k < 10 ? k.toFixed(1) : k.toFixed(0)}</div></div>`;
@@ -910,23 +1350,52 @@ function viewMap(s) {
   loadWorld();
   const np = s.netpath;
   const eg = np.egress && hasCoords(np.egress.geo) ? np.egress.geo : null;
-  const max = Math.max(1, ...s.hosts.map((h) => h.bytes_in + h.bytes_out));
+  const defs = mapDefs(s), st = facetState("map"), filtered = facetCount(st) > 0;
+  learnCountries(s.hosts.map((h) => h.geo));
+  const hosts = facetFilter(st, defs, s.hosts);
+  const total = (h) => h.bytes_in + h.bytes_out;
+  // Hosts in one city share a dot: its size is their traffic, its label the city and count.
+  const clusters = clusterPoints(hosts.filter((h) => hasCoords(h.geo)).map((h) => ({ lat: h.geo.lat, lon: h.geo.lon, weight: total(h), host: h })));
+  const maxW = Math.max(1, ...clusters.map((c) => c.weight));
   const points = [], lines = [];
-  for (const h of s.hosts) {
-    const g = h.geo;
-    if (!hasCoords(g)) continue;
-    const total = h.bytes_in + h.bytes_out;
-    const color = g.anycast ? "#94a3b8" : "#2563eb";
-    points.push({ lat: g.lat, lon: g.lon, r: (3 + 14 * Math.sqrt(total / max)).toFixed(1), color, title: `${h.name || h.ip}\n${placeText(g)}\n${g.org || ""}\n${fmtBytes(total)}`, attr: `data-host="${esc(h.ip)}"`, label: h.name || h.ip });
-    if (eg) lines.push([eg, g, color]);
+  for (const c of clusters) {
+    const h0 = c.items[0].host, g = h0.geo, n = c.items.length;
+    const color = c.items.every((i) => anycastOf(i.host)) ? "#94a3b8" : "#2563eb";
+    const place = placeText(g) || g.country_code || "";
+    const title = n === 1 ? `${h0.name || h0.ip}\n${place}\n${g.org || ""}\n${fmtBytes(c.weight)}`
+      : `${place} — ${t("map_n_hosts", { n })}, ${fmtBytes(c.weight)}\n${c.items.slice(0, 8).map((i) => `• ${i.host.name || i.host.ip} — ${fmtBytes(i.weight)}`).join("\n")}${n > 8 ? "\n…" : ""}`;
+    points.push({ lat: c.lat, lon: c.lon, r: (3 + 14 * Math.sqrt(c.weight / maxW)).toFixed(1), color, title, prio: c.weight,
+      attr: n === 1 ? `data-host="${esc(h0.ip)}"` : `data-mapcluster="${esc(c.key)}"`,
+      label: n === 1 ? h0.name || h0.ip : `${gName(g, "city") || gName(g, "country") || g.country_code} · ${n}` });
+    if (eg) lines.push([eg, c, color]);
   }
   for (const x of vpnTunnels(np)) for (const sv of x.servers) if (hasCoords(sv.geo)) points.push({ lat: sv.geo.lat, lon: sv.geo.lon, r: 7, color: "#f59e0b", title: `${t("map_vpn")}: ${sv.addr}\n${x.process}`, label: `VPN · ${x.process}`, always: true });
   if (eg) points.push({ lat: eg.lat, lon: eg.lon, r: 8, color: "#16a34a", title: `${t("map_egress")}: ${np.egress.ip}\n${placeText(eg)}`, label: `${t("map_egress")} · ${placeText(eg) || np.egress.ip}`, always: true });
   const dot = (c) => `<span class="inline-block h-2.5 w-2.5 rounded-full" style="background:${c}"></span>`;
   const legend = `<div class="flex flex-wrap gap-4 px-4 py-2 text-[12px] text-slate-500"><span>${dot("#16a34a")} ${t("map_egress")}</span><span>${dot("#f59e0b")} ${t("map_vpn")}</span><span>${dot("#2563eb")} ${t("map_host")}</span><span>${dot("#94a3b8")} ${t("map_anycast")}</span><span class="ml-auto">${t("map_drag_hint")}</span>${worldFailed ? `<span class="text-amber-700">${t("map_offline")}</span>` : ""}</div>`;
-  const maxC = Math.max(1, ...np.countries.map((c) => c.bytes));
-  return `${panel(`${t("map")} <span class="sub">· ${t("map_hint")}</span>`, worldSvg(points, lines) + legend, "mb-4")}
-    ${panel(t("countries"), `<table class="grid-table"><tbody>${np.countries.map((c) => `<tr><td>${cc(c.code)} ${esc(countryName(c))}</td><td class="r num text-slate-500">${c.hosts} ${t("hosts_n")}</td><td class="w-1/3">${bar(c.bytes / maxC, "#0ea5e9")}</td><td class="r num">${fmtBytes(c.bytes)}</td></tr>`).join("") || empty(4, np.geo ? t("no_ext") : t("geo_off"))}</tbody></table>`)}`;
+  // The opened cluster: its hosts, each leading to its connections.
+  const open = ui.mapCluster && clusters.find((c) => c.key === ui.mapCluster);
+  const here = open ? panel(`${t("map_here")} <span class="sub">· ${esc(placeText(open.items[0].host.geo) || open.items[0].host.geo.country_code || "")} · ${t("map_n_hosts", { n: open.items.length })}</span>`,
+    `<table class="grid-table"><tbody>${open.items.map((i) => `<tr class="clickable" data-host="${esc(i.host.ip)}"><td class="max-w-[260px] truncate"><span class="font-medium">${esc(i.host.name || i.host.ip)}</span> <span class="mono text-[11px] text-slate-400">${esc(i.host.ip)}</span></td><td class="text-[12px]">${orgLine(i.host.geo)}</td><td class="max-w-[200px] truncate text-[12px] text-slate-500">${(i.host.processes || []).map(esc).join(", ")}</td><td class="r num">${fmtBytes(i.weight)}</td></tr>`).join("")}</tbody></table>`, "mb-4", `<button class="btn" data-mapcluster="">✕</button>`) : "";
+  // Countries of the hosts shown (the server's full list when nothing is filtered); a click
+  // toggles the country filter.
+  let countries = np.countries.map((c) => ({ code: c.code, label: countryName(c), hosts: c.hosts, bytes: c.bytes }));
+  if (filtered) {
+    const m = new Map();
+    for (const h of hosts) {
+      const g = h.geo, code = g && g.country_code;
+      if (!code) continue;
+      const x = m.get(code) || { code, label: gName(g, "country") || code, hosts: 0, bytes: 0 };
+      x.hosts++; x.bytes += total(h); m.set(code, x);
+    }
+    for (const code of st.country || []) if (!m.has(code)) m.set(code, { code, label: countryLabel(code), hosts: 0, bytes: 0 });
+    countries = [...m.values()].sort((a, b) => b.bytes - a.bytes);
+  }
+  const chosen = new Set((st.country || []).map((c) => String(c).toUpperCase()));
+  const maxC = Math.max(1, ...countries.map((c) => c.bytes));
+  const ctable = `<table class="grid-table"><tbody>${countries.map((c) => `<tr class="clickable ${chosen.has(c.code.toUpperCase()) ? "bg-blue-50" : ""}" data-ftog="country" data-v="${esc(c.code)}" title="${esc(t("fb_click"))}"><td>${cc(c.code)} ${esc(c.label)}</td><td class="r num text-slate-500">${c.hosts} ${t("hosts_n")}</td><td class="w-1/3">${bar(c.bytes / maxC, "#0ea5e9")}</td><td class="r num">${fmtBytes(c.bytes)}</td></tr>`).join("") || empty(4, np.geo ? t("no_ext") : t("geo_off"))}</tbody></table>`;
+  return `${panel(`${t("map")} <span class="sub">· ${filtered ? shownOf(hosts.length, s.hosts.length) + " · " : ""}${t("map_hint")}</span>`, facetBar("map", defs, s.hosts) + worldSvg(points, lines) + legend, "mb-4")}
+    ${here}${panel(t("countries"), ctable)}`;
 }
 
 // ================= route, tracing, watch =================
@@ -1024,10 +1493,21 @@ function viewRoute(s) {
 
 // ================= DNS =================
 
+/** Query string of the DNS page: text, value lists (`f`), slow answers, local names. */
+function dnsQs() {
+  const qs = new URLSearchParams(), q = ui.dnsQuery.trim(), st = facetState("dns");
+  if (q) qs.set("q", q);
+  const f = serverFacets(st, dnsDefs());
+  if (f) qs.set("f", f);
+  if (st.slow) qs.set("slow", st.slow);
+  if (st.hide_local) qs.set("hide_local", "true");
+  return qs.toString();
+}
+
 async function refreshDns() {
-  const seq = ++ui.seq.dns, q = ui.dnsQuery.trim();
-  try { const d = await getJson("/api/dns?limit=500" + (q ? "&q=" + encodeURIComponent(q) : "")); if (seq === ui.seq.dns) ui.dnsData = d; } catch (e) { console.error(e); }
-  if (route.name === "dns" && seq === ui.seq.dns) renderView();
+  const seq = ++ui.seq.dns, qs = dnsQs();
+  try { const d = await getJson("/api/dns?limit=500" + (qs ? "&" + qs : "")); if (seq === ui.seq.dns) ui.dnsData = d; } catch (e) { console.error(e); }
+  if (route.name === "dns" && seq === ui.seq.dns && !fselOpen()) renderView();
 }
 
 function viewDns() {
@@ -1037,18 +1517,18 @@ function viewDns() {
   const rows = d ? d.entries.map((e) => `<tr>
       <td class="num whitespace-nowrap text-[12px] text-slate-500">${clockUs(e.ts_us)}</td>
       <td class="max-w-[300px]"><div class="mono truncate font-medium" title="${esc(e.name)}">${esc(e.name)}</div></td>
-      <td class="text-[12px]">${esc(e.qtype)}</td><td class="text-[12px] ${rcodeCls(e.rcode)}">${esc(e.rcode || "…")}</td>
+      <td class="text-[12px]">${fcell("qtype", e.qtype, esc(e.qtype))}</td><td class="text-[12px] ${rcodeCls(e.rcode)}">${fcell("rcode", e.rcode || "pending", esc(e.rcode || "…"))}</td>
       <td class="mono max-w-[220px] truncate text-[12px]" title="${esc(e.answers.join(", "))}">${e.answers.map(esc).join(", ") || dash}</td>
       <td class="r">${e.latency_ms !== null ? `<span class="num">${fmtMs(e.latency_ms)}</span>` : dash}</td>
-      <td class="text-[12px]">${e.requester ? esc(e.requester.name) : dash}</td>
+      <td class="text-[12px]">${e.requester ? fcell("process", e.requester.name, esc(e.requester.name)) : dash}</td>
       <td class="max-w-[200px] truncate text-[12px]">${e.used_by.map(esc).join(", ") || dash}</td>
-      <td class="mono text-[11px] text-slate-500">${esc(e.resolver)} · ${esc(e.transport)}</td></tr>`).join("") : "";
+      <td class="mono text-[11px] text-slate-500">${fcell("resolver", e.resolver, esc(e.resolver))} · ${fcell("transport", e.transport, esc(e.transport))}</td></tr>`).join("") : "";
   const enc = d ? d.encrypted.map((c) => `<tr class="clickable" data-conn="${c.id}"><td>${procLabel(c.process)}</td><td><span class="chip bg-indigo-100 text-indigo-800">${esc(c.encrypted_dns)}</span></td><td class="mono text-[12px]">${esc(c.remote)}</td><td class="text-[12px]">${esc(c.name || "")}</td><td class="r num">${fmtBytes(c.bytes_in + c.bytes_out)}</td></tr>`).join("") : "";
   return `${panel(`${t("enc_dns")} <span class="sub">· ${t("enc_dns_hint")}</span>`, `<table class="grid-table"><tbody>${enc || empty(5, d ? t("enc_none") : t("loading"))}</tbody></table>`, "mb-4")}
-    ${panel(`${t("dns")} <span class="sub">· ${t("dns_hint")}${d ? " · " + t("dns_stats", { q: fmtNum(d.queries), f: fmtNum(d.failures) }) : ""}</span>`,
-      `<div class="scroll max-h-[70vh]"><table class="grid-table"><thead><tr><th>${t("time")}</th><th>${t("name")}</th><th>${t("type")}</th><th>${t("result")}</th><th>${t("answers")}</th><th class="r">${t("latency")}</th><th>${t("requester")}</th><th>${t("used_by")}</th><th>${t("resolver")}</th></tr></thead>
+    ${panel(`${t("dns")} <span class="sub">· ${t("dns_hint")}${d ? " · " + t("dns_stats", { q: fmtNum(d.queries), f: fmtNum(d.failures) }) + (facetCount(facetState("dns")) ? " · " + t("fb_found", { n: fmtNum(d.total) }) : "") : ""}</span>`,
+      `${facetBar("dns", dnsDefs(), [], d ? d.facets : {})}<div class="scroll max-h-[70vh]"><table class="grid-table"><thead><tr><th>${t("time")}</th><th>${t("name")}</th><th>${t("type")}</th><th>${t("result")}</th><th>${t("answers")}</th><th class="r">${t("latency")}</th><th>${t("requester")}</th><th>${t("used_by")}</th><th>${t("resolver")}</th></tr></thead>
       <tbody>${d ? rows || empty(9, t("nothing")) : empty(9, t("loading"))}</tbody></table></div>`, "",
-      `<input id="dns-q" type="search" class="input w-72" value="${esc(ui.dnsQuery)}" placeholder="${esc(t("dns_ph"))}" autocomplete="off"><a class="btn" href="/api/export/dns.csv${ui.dnsQuery.trim() ? "?q=" + encodeURIComponent(ui.dnsQuery.trim()) : ""}">${t("export_csv")}</a>`)}`;
+      `<input id="dns-q" type="search" class="input w-72" value="${esc(ui.dnsQuery)}" placeholder="${esc(t("dns_ph"))}" autocomplete="off"><a class="btn" href="/api/export/dns.csv${dnsQs() ? "?" + dnsQs() : ""}">${t("export_csv")}</a>`)}`;
 }
 
 // ================= OS sockets =================
@@ -1056,16 +1536,17 @@ function viewDns() {
 function viewSockets() {
   const pid = route.params.pid;
   const q = ui.sockQuery.trim().toLowerCase();
-  let list = sockCache ? sockCache.sockets : [];
+  const all = sockCache ? sockCache.sockets : [], defs = socketDefs();
+  let list = facetFilter(facetState("sockets"), defs, all);
   if (q) list = list.filter((x) => (x.process || "").toLowerCase().includes(q) || x.local.includes(q) || (x.remote || "").includes(q) || String(x.pid) === q || (x.state || "").toLowerCase().includes(q));
   const rows = list.slice(0, 3000).map((x) => `<tr class="${x.pid ? "clickable" : ""}" data-sockpid="${x.pid}">
-      <td>${x.process ? `<span class="font-medium">${esc(x.process)}</span>` : '<span class="text-slate-400">—</span>'} <span class="num text-[11px] text-slate-400">${x.pid}</span></td>
-      <td class="text-[11px] uppercase text-slate-500">${esc(x.proto)}</td><td class="mono text-[12px]">${esc(x.local)}</td><td class="mono text-[12px]">${esc(x.remote || "—")}</td>
-      <td class="text-[12px] ${x.state === "ESTABLISHED" ? "text-emerald-700" : x.state === "LISTEN" ? "text-sky-700" : "text-slate-400"}">${esc(x.state || "")}</td></tr>`).join("");
+      <td>${x.process ? fcell("process", x.process, `<span class="font-medium">${esc(x.process)}</span>`) : '<span class="text-slate-400">—</span>'} <span class="num text-[11px] text-slate-400">${x.pid}</span></td>
+      <td class="text-[11px] uppercase text-slate-500">${fcell("proto", String(x.proto).toLowerCase(), esc(x.proto))}</td><td class="mono text-[12px]">${esc(x.local)}${isExposed(x) ? ` <span class="chip bg-amber-100 text-amber-800" title="${esc(t("fb_exposed_tip"))}">${t("fb_exposed")}</span>` : ""}</td><td class="mono text-[12px]">${esc(x.remote || "—")}</td>
+      <td class="text-[12px] ${x.state === "ESTABLISHED" ? "text-emerald-700" : x.state === "LISTEN" ? "text-sky-700" : "text-slate-400"}">${fcell("state", x.state, esc(x.state || ""))}</td></tr>`).join("");
   const off = sockCache && !sockCache.enabled;
   const pidChip = pid ? `<a href="#/sockets" class="chip bg-blue-50 text-blue-700" style="text-transform:none;font-size:12px;line-height:22px;text-decoration:none">pid ${esc(pid)} ✕</a>` : "";
-  return panel(`${t("sockets")} <span class="sub">· ${t("sockets_hint")} · ${fmtNum(list.length)}</span>`,
-    `${sockCache && sockCache.error ? `<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-amber-800">${esc(sockCache.error)}</div>` : ""}<div class="scroll max-h-[78vh]"><table class="grid-table">
+  return panel(`${t("sockets")} <span class="sub">· ${t("sockets_hint")} · ${shownOf(list.length, all.length)}</span>`,
+    `${off ? "" : facetBar("sockets", defs, all)}${sockCache && sockCache.error ? `<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-amber-800">${esc(sockCache.error)}</div>` : ""}<div class="scroll max-h-[78vh]"><table class="grid-table">
     <thead><tr><th>${t("process")}</th><th>${t("proto")}</th><th>${t("local_addr")}</th><th>${t("remote_addr")}</th><th>${t("state")}</th></tr></thead>
     <tbody>${off ? empty(5, t("sock_off")) : rows || empty(5, sockCache ? t("nothing") : t("loading"))}</tbody></table></div>`, "",
     `${pidChip}<input id="sock-q" type="search" class="input w-64" value="${esc(ui.sockQuery)}" placeholder="${esc(t("sock_ph"))}" autocomplete="off">`);
@@ -1073,7 +1554,7 @@ function viewSockets() {
 
 async function refreshSockets() {
   try { sockCache = await getJson("/api/sockets" + (route.params.pid ? "?pid=" + encodeURIComponent(route.params.pid) : "")); } catch (e) { console.error(e); }
-  if (route.name === "sockets") renderView();
+  if (route.name === "sockets" && !fselOpen()) renderView();
 }
 
 // ================= alerts =================
@@ -1088,8 +1569,11 @@ function alertItem(a) {
 function viewAlerts(s) {
   const c = s.alert_counts;
   const tabs = [["all", c.total], ["high", c.high], ["medium", c.medium], ["low", c.low]];
-  const items = s.alerts.filter((a) => ui.alertFilter === "all" || a.severity === ui.alertFilter);
-  return panel(t("alerts"), `<div class="divide-y divide-[#eef0f3]">${items.map(alertItem).join("") || `<div class="py-10 text-center text-slate-400">${s.alerts.length ? t("no_level") : t("quiet")}</div>`}</div>`, "",
+  const defs = alertDefs(s), q = ui.alertQuery.trim().toLowerCase();
+  const bySeverity = s.alerts.filter((a) => ui.alertFilter === "all" || a.severity === ui.alertFilter);
+  const items = facetFilter(facetState("alerts"), defs, bySeverity).filter((a) => !q || [a.message, a.host, a.name, t("kind_" + a.kind), ...Object.values(a.details || {})].some((x) => String(x || "").toLowerCase().includes(q)));
+  const fbar = facetBar("alerts", defs, bySeverity, null, `<input id="alert-q" type="search" class="input w-56" value="${esc(ui.alertQuery)}" placeholder="${esc(t("alert_ph"))}" autocomplete="off">`);
+  return panel(`${t("alerts")} <span class="sub">· ${shownOf(items.length, s.alerts.length)}</span>`, `${fbar}<div class="divide-y divide-[#eef0f3]">${items.map(alertItem).join("") || `<div class="py-10 text-center text-slate-400">${s.alerts.length ? t("no_level") : t("quiet")}</div>`}</div>`, "",
     tabs.map(([k, n]) => `<button class="btn ${ui.alertFilter === k ? "btn-primary" : ""}" data-filter="${k}">${t("f_" + k)} <span class="num opacity-70">${n}</span></button>`).join(""));
 }
 
@@ -1222,6 +1706,8 @@ function journalQs(format) {
   if (from !== null) qs.set("from", String(from));
   if (j.q.trim()) qs.set("q", j.q.trim());
   if (format) qs.set("format", format);
+  const f = j.kind === "log" ? "" : serverFacets(facetState("journal:" + j.kind), journalDefs(j.kind));
+  if (f) qs.set("f", f);
   return qs.toString();
 }
 async function refreshJournal() {
@@ -1238,10 +1724,10 @@ async function refreshJournal() {
 function journalRows(kind, recs, nowSec) {
   if (kind === "connections") return recs.map((c) => `<tr class="${c.id !== undefined ? "" : ""}">
       <td class="num whitespace-nowrap text-[12px] text-slate-500">${clockUs(c.first_us)}</td>
-      <td class="max-w-[160px] truncate">${procLabel(c.process)}</td>
-      <td class="whitespace-nowrap">${chip(c.app)} <span class="text-[10px] uppercase text-slate-400">${esc(c.l4)}</span></td>
+      <td class="max-w-[160px] truncate">${fcell("process", c.process && c.process.name, procLabel(c.process))}</td>
+      <td class="whitespace-nowrap">${fcell("app", c.app, chip(c.app))} <span class="text-[10px] uppercase text-slate-400">${esc(c.l4)}</span></td>
       <td class="max-w-[240px]"><div class="truncate font-medium">${esc(c.name || c.remote_ip)}</div><div class="mono truncate text-[11px] text-slate-500">${esc(c.remote)}</div></td>
-      <td class="whitespace-nowrap">${geoLine(c.geo)}</td>
+      <td class="whitespace-nowrap">${fcell("country", c.geo && c.geo.country_code, geoLine(c.geo))}</td>
       <td class="r num text-sky-700">${fmtBytes(c.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(c.bytes_out)}</td>
       <td class="r num text-slate-500">${duration((c.last_us - c.first_us) / 1e6)}</td>
       <td class="text-[12px] text-slate-500">${t("j_reason_" + c.reason) === "j_reason_" + c.reason ? esc(c.reason) : t("j_reason_" + c.reason)}</td></tr>`).join("");
@@ -1277,7 +1763,9 @@ function viewJournal(s) {
   }
   const count = j.kind !== "log" && j.data ? `<span class="sub">· ${t("j_records", { n: fmtNum(j.data.records.length), t: fmtNum(j.data.total) })}</span>` : "";
   const exports = j.kind !== "log" ? `<a class="btn" href="/api/journal?${journalQs("csv")}">${t("j_export_csv")}</a><a class="btn" href="/api/journal?${journalQs("jsonl")}">${t("j_export_jsonl")}</a>` : "";
-  const tools = `<div class="flex flex-wrap items-center gap-2 border-b border-[#eef0f3] px-3 py-2">${tabs}<span class="mx-1"></span>${j.kind !== "log" ? `<div class="seg">${ranges}</div><input id="journal-q" type="search" class="input min-w-[220px] flex-1" value="${esc(j.q)}" placeholder="${esc(t("j_search_ph"))}" autocomplete="off">` : ""}<button class="btn" id="journal-refresh">${t("j_refresh")}</button>${exports}<span class="ml-auto text-[12px]">${kept}</span></div>`;
+  if (j.data) learnCountries(j.data.records.map((r) => r.geo));
+  const fbar = j.kind !== "log" ? facetBar("journal:" + j.kind, journalDefs(j.kind), [], j.data && j.data.facets ? j.data.facets : {}) : "";
+  const tools = `<div class="flex flex-wrap items-center gap-2 border-b border-[#eef0f3] px-3 py-2">${tabs}<span class="mx-1"></span>${j.kind !== "log" ? `<div class="seg">${ranges}</div><input id="journal-q" type="search" class="input min-w-[220px] flex-1" value="${esc(j.q)}" placeholder="${esc(t("j_search_ph"))}" autocomplete="off">` : ""}<button class="btn" id="journal-refresh">${t("j_refresh")}</button>${exports}<span class="ml-auto text-[12px]">${kept}</span></div>${fbar}`;
   return panel(`${t("journal")} <span class="sub">· ${t("j_hint")}</span> ${count}`, tools + body);
 }
 
@@ -1499,6 +1987,7 @@ function renderView(routeChanged) {
   else if (!last) html = panel("netscope", `<div class="py-10 text-center text-slate-400">${t("waiting")}</div>`);
   else html = ({ processes: viewProcesses, connections: viewConnections, hosts: viewHosts, map: viewMap, route: viewRoute, dns: viewDns, sockets: viewSockets, alerts: viewAlerts }[route.name] || viewOverview)(last);
   v.innerHTML = html;
+  v.querySelectorAll(".map-wrap").forEach(layoutLabels);
   // Keyboard access: clickable rows are focusable (Enter/Space activate them, see below);
   // search boxes get their placeholder as an accessible name.
   v.querySelectorAll(".clickable").forEach((e) => e.setAttribute("tabindex", "0"));
@@ -1519,7 +2008,11 @@ function schedulePolling() {
   else if (route.name === "route" || route.name === "hosts") { every(refreshWatch, 5000); if (route.name === "route" && ui.routeIp && !ui.traces[ui.routeIp]) runTrace(ui.routeIp); }
   else if (route.name === "settings") { ui.settings.status = null; loadSettings(); }
   else if (route.name === "journal") { if (route.params.kind) ui.journal.kind = route.params.kind; refreshJournal(); }
+  syncFacetUrl();
 }
+
+/** A filter drop-down has the focus (maybe open): re-rendering now would close it. */
+const fselOpen = () => !!(document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("fsel"));
 
 function setConnQuery(q) {
   ui.connQuery = q; store.set("connQuery", q);
@@ -1535,6 +2028,15 @@ $("view").addEventListener("click", (ev) => {
     if (x.dataset.mapZoom === "reset") ui.mapViews[key] = null; else zoomView(key, x.dataset.mapZoom === "in" ? 0.5 : 2);
     applyMapView(wrap); return;
   }
+  // Filter bars and clickable values (before the row handlers: the values sit in rows).
+  if ((x = hit("[data-fadd]"))) { ev.stopPropagation(); addFacetValue(x.dataset.fadd, x.dataset.v); return; }
+  if ((x = hit("[data-ftog]"))) { const k = facetKey(); if (k) setFacets(k, facetToggle(facetState(k), x.dataset.ftog, x.dataset.v)); return; }
+  if ((x = hit("[data-fflag]"))) { const k = x.dataset.fv, st = { ...facetState(k) }; if (st[x.dataset.fflag]) delete st[x.dataset.fflag]; else st[x.dataset.fflag] = true; setFacets(k, st); return; }
+  if ((x = hit("[data-fdel]"))) { setFacets(x.dataset.fv, facetToggle(facetState(x.dataset.fv), x.dataset.fdel, x.dataset.v)); return; }
+  if ((x = hit("[data-freset]"))) { setFacets(x.dataset.fv, {}); return; }
+  if ((x = hit("[data-fclause]"))) { setConnQuery(toggleClause(ui.connQuery, x.dataset.fclause)); return; }
+  if ((x = hit("[data-fclear]"))) { setConnQuery(""); return; }
+  if ((x = hit("[data-mapcluster]"))) { ui.mapCluster = x.dataset.mapcluster || null; renderView(); return; }
   if ((x = hit("[data-goto]"))) { location.hash = x.dataset.goto; return; }
   if ((x = hit("[data-watch-add]"))) { ev.stopPropagation(); watchChange("POST", x.dataset.watchAdd, x.dataset.label); return; }
   if ((x = hit("[data-watch-remove]"))) { watchChange("DELETE", x.dataset.watchRemove); return; }
@@ -1563,6 +2065,17 @@ $("view").addEventListener("click", (ev) => {
   if (el.id === "journal-refresh") { ui.journal.stats = null; refreshJournal(); return; }
   if (el.id === "set-restart") { restartNow(); }
   if (el.id === "set-unsnooze") { unsnooze(); }
+});
+
+// Filter drop-downs: a value or a choice was picked (the drop-down gives the focus back, so
+// the next snapshot may redraw the page).
+$("view").addEventListener("change", (ev) => {
+  const el = ev.target, d = el.dataset || {};
+  if (d.fmulti === undefined && d.fpick === undefined && d.fq === undefined) return;
+  el.blur();
+  if (d.fmulti !== undefined && el.value) setFacets(d.fv, facetToggle(facetState(d.fv), d.fmulti, el.value));
+  else if (d.fpick !== undefined) { const st = { ...facetState(d.fv) }; if (el.value) st[d.fpick] = el.value; else delete st[d.fpick]; setFacets(d.fv, st); }
+  else if (d.fq !== undefined && el.value) setConnQuery(addClause(ui.connQuery, el.value));
 });
 
 // Settings form: keep the edited values in ui.settings.form (the page re-renders on save).
@@ -1622,6 +2135,8 @@ $("view").addEventListener("input", (ev) => {
     ev.target._t = setTimeout(() => { schedulePolling(); renderView(); }, 300);
   } else if (id === "sock-q") { ui.sockQuery = val; renderView(); }
   else if (id === "host-q") { ui.hostQuery = val; renderView(); }
+  else if (id === "proc-q") { ui.procQuery = val; renderView(); }
+  else if (id === "alert-q") { ui.alertQuery = val; renderView(); }
   else if (id === "dns-q") { ui.dnsQuery = val; clearTimeout(ev.target._t); ev.target._t = setTimeout(refreshDns, 300); }
   else if (id === "route-ip") ui.routeIp = val.trim();
   else if (id === "journal-q") { ui.journal.q = val; clearTimeout(ev.target._t); ev.target._t = setTimeout(refreshJournal, 300); }
@@ -1635,7 +2150,7 @@ function onSnapshot(s) {
   notifyNew(s);
   // These views refresh on their own timers; typing must not be interrupted.
   const self = ["conn", "sockets", "dns", "settings", "journal"].includes(route.name) || (route.name === "connections" && (route.params.pid !== undefined || ui.connQuery.trim()));
-  const typing = (document.activeElement && ["route-ip", "watch-ip"].includes(document.activeElement.id)) || ui.mapDrag;
+  const typing = (document.activeElement && ["route-ip", "watch-ip"].includes(document.activeElement.id)) || ui.mapDrag || fselOpen();
   // The very first snapshot must always render: self-refreshing views may have drawn a placeholder.
   if (first || (!self && !typing)) renderView(); else renderNav();
 }
@@ -1668,6 +2183,7 @@ function connect() {
 route = parseRoute();
 if (route.name === "route" && route.params.ip) ui.routeIp = route.params.ip;
 if (route.name === "connections" && route.params.q !== undefined) ui.connQuery = route.params.q;
+facetsFromUrl();
 renderChrome();
 renderView(true);
 connect();

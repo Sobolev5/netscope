@@ -10,7 +10,7 @@ security alerts, Prometheus metrics and a journal on disk — in one small deskt
 <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4" alt="Windows 10/11 x64">
 <img src="https://img.shields.io/badge/rust-2021-f74c00?logo=rust" alt="Rust">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
-<img src="https://img.shields.io/badge/tests-310%20passing-brightgreen" alt="Tests">
+<img src="https://img.shields.io/badge/tests-320%20passing-brightgreen" alt="Tests">
 <img src="https://img.shields.io/badge/languages-EN%20%7C%20RU-8b5cf6" alt="English / Russian">
 </p>
 
@@ -36,7 +36,10 @@ and runs the demo (`netscope --demo`). The binaries are not code-signed yet, so 
   the remote host named from DNS answers, TLS SNI or HTTP `Host`, its country/city/provider, hops and link quality.
 * **Wireshark in the browser** — packet list with one-line summaries, a packet inspector (Ethernet / IP / TCP·UDP /
   DNS·HTTP·TLS fields with byte ranges and a hex dump), follow stream with TCP reassembly, `.pcap` export.
-* **Filters** such as `chrome tls`, `process == Code.exe and country != RU`, `bytes > 1MB and not signed`.
+* **Filters on every page** — country, program, provider, protocol, activity, signature, DNS result and more,
+  with counts next to each value; click a country or a program in any table to filter by it. On the
+  connection list the same choices write the query language: `chrome tls`, `process == Code.exe and country != RU`,
+  `bytes > 1MB and not signed`, `not lan and idle < 5m`.
 * **TLS** — JA4 client fingerprints, SNI/ALPN, server version and cipher, certificate chain (TLS ≤ 1.2).
 * **DNS journal**, encrypted DNS (DoH/DoT/DoQ) detection, suspicious-name alerts (tunneling, exfiltration).
 * **Alerts** — credentials over HTTP, cleartext protocols, traffic spikes, port scans, suspicious connections
@@ -157,10 +160,23 @@ Memory: 4096 connections, 200 packets each, 96 MiB of stored frames at most.
 
 * **Filter language** (Connections page and `GET /api/connections?q=`), Wireshark-like:
   `chrome tls`, `process == Code.exe and country != RU`, `bytes > 1MB and not signed`,
-  `rtt > 150ms or retrans > 5`, `country in {US, DE}`, `ip == 140.82.*`, `doh`.
+  `rtt > 150ms or retrans > 5`, `country in {US, DE}`, `ip == 140.82.*`, `doh`, `not lan and idle < 5m`.
   Fields: process, pid, path, app, l4, name, ip, port, lport, country, city, org, asn, anycast,
-  state, dir, bytes, in, out, packets, rtt, retrans, hops, tls, alpn, ja4, signed, doh
+  state, dir, bytes, in, out, packets, rtt, retrans, hops, tls, alpn, ja4, signed, doh,
+  lan (the other end is in a local network), idle (time since the last packet)
   (`GET /api/filter/fields` lists aliases). Syntax errors come back with their position.
+  The quick filters above the list (program, protocol, country, provider, direction, recent,
+  open, unsigned, internet/LAN, DoH) add these clauses for you.
+* **Filter bars** on the Processes, Hosts, Map, DNS, OS sockets, Alerts and Journal pages: drop-downs
+  of the values present (with counts that follow the other filters), choices such as "active in the
+  last 5 minutes" or "latency > 100 ms", and toggles ("flagged", "reachable from the network", "no
+  mDNS"). A value in a table with a dotted underline filters by itself when clicked. Each page keeps
+  its filters across restarts and in the address (`#/hosts?f={"country":["DE"]}`), so a filtered
+  view can be bookmarked. DNS and Journal filter on the server, over everything kept, not just
+  the rows on screen.
+* **Map**: hosts in one city share one dot (its size is their traffic; a click lists them), and
+  labels are placed where they do not overlap — more of them as you zoom in; the exit point and
+  VPN servers are always labelled. A click on a country in the table below filters the map.
 * **"First seen" alerts** (after a 60 s learning period): a program going online for the
   first time, contacting a new domain/provider or a new country, a new port reachable from
   the network. Browser notifications can be switched on in the header.
@@ -361,13 +377,13 @@ option). Building with the `x86_64-pc-windows-gnu` toolchain also needs a full M
 | `GET /api/netpath` | egress address, VPN tunnels, traffic per country |
 | `GET /api/trace?ip=&fresh=` | trace the route to an address (cached 5 min) |
 | `GET /api/geo?ip=` | location and provider of an address |
-| `GET /api/dns?q=&limit=` | DNS journal and encrypted-DNS connections |
+| `GET /api/dns?q=&limit=&f=&slow=&hide_local=` | DNS journal and encrypted-DNS connections; `f` narrows by field (`{"rcode":["NXDOMAIN"],"process":["chrome.exe"]}`, fields rcode, qtype, process, resolver, transport; `pending` = no answer), `slow` keeps answers that took at least that many ms, `hide_local=true` leaves out mDNS and `.local`; `facets` lists each field's values with counts |
 | `GET /api/filter/fields` | filter field names and aliases |
 | `GET/POST/DELETE /api/watch?ip=&label=` | watched routes and their history |
 | `GET /api/export/{connections,hosts,processes,dns}.csv` | CSV exports (`connections` takes `q=`, `pid=`) |
 | `GET /api/export/connections.pcap?q=` | stored packets of matching connections |
 | `GET /api/connections/{id}/pcap` | stored packets of one connection |
-| `GET /api/journal?kind=connections\|dns\|alerts&from=&to=&q=&limit=&format=json\|jsonl\|csv` | journal records, newest first: `{"kind","from","to","total","records":[…]}`; `from`/`to` unix seconds (default: the kept days), `q` case-insensitive text search, `limit` ≤ 5000 (default 500); `jsonl`/`csv` are downloads |
+| `GET /api/journal?kind=connections\|dns\|alerts&from=&to=&q=&limit=&format=json\|jsonl\|csv` | journal records, newest first: `{"kind","from","to","total","records":[…]}`; `from`/`to` unix seconds (default: the kept days), `q` case-insensitive text search, `f` value lists per field as JSON (connections: process, app, country, org, dir, reason; dns: rcode, qtype, process, resolver, transport; alerts: severity, category, kind, process, host), `limit` ≤ 5000 (default 500); the response's `facets` lists each field's values with counts; `jsonl`/`csv` are downloads |
 | `GET /api/journal/stats` | journal files per day (`{"dir","days":[{"date","records":{"connections","dns","alerts"},"bytes"}],"bytes_total","days_kept","enabled","pending","dropped"}`) |
 | `GET /api/logs?lines=200` | the end of the program's log file (`{"file","lines"}`; `file` is `null` for the CLI, which logs to the console), at most 5000 lines |
 | `GET /api/settings` · `POST /api/settings` | the settings file, what is active, `journal` (`dir`, `days`, `enabled`) and `api` (`base`, `metrics`); `POST` saves a patch (`journal_days` applies at once) |

@@ -2043,6 +2043,100 @@ mod tests {
     }
 
     #[test]
+    fn connection_filter_knows_lan_and_idle() {
+        use crate::analytics::filter::Filter;
+        use crate::analytics::views::CONN_FIELDS;
+        let mut s = state();
+        s.record(us(T0), 60, Some(&syn(ME, "192.168.1.9", 5000, 445)));
+        // The idle time counts from the last packet, not the first.
+        s.record(us(T0 + 20), 60, Some(&pkt(ME, "192.168.1.9", 5000, 445, Proto::Tcp, App::None)));
+        s.record(us(T0 + 50), 60, Some(&syn(ME, "203.0.113.9", 5001, 443)));
+        s.advance(T0 + 60);
+        let n = |q: &str| s.connections(None, Some(&Filter::parse(q, CONN_FIELDS).unwrap()), 10).0;
+        assert_eq!((n("lan"), n("not lan"), n("lan == false"), n("local_net")), (1, 1, 1, 1));
+        assert_eq!(n("idle < 30s"), 1, "the external one was active 10 s ago");
+        assert_eq!(n("idle >= 1m"), 0, "the LAN one was last active 40 s ago");
+        assert_eq!(n("idle >= 40s"), 1);
+        assert_eq!(n("age > 2m"), 0, "alias");
+        assert_eq!(n("idle < 1m and not lan"), 1);
+        let (_, list) = s.connections(None, None, 10);
+        let lan = list.iter().find(|c| c.remote_ip == "192.168.1.9").unwrap();
+        assert!((lan.lan, lan.idle_ms) == (true, 40_000.0), "{} {}", lan.lan, lan.idle_ms);
+        let v = serde_json::to_value(lan).unwrap();
+        assert_eq!(v["lan"], true);
+        assert!(v.get("idle_ms").is_none(), "the idle time is a filter field, not part of the JSON");
+    }
+
+    #[test]
+    fn hosts_list_the_programs_that_talked_to_them() {
+        let mut s = state();
+        let mut sockets = Vec::new();
+        let mut procs = Vec::new();
+        let names: Vec<String> = (0..10).map(|i| format!("p{}.exe", 9 - i)).collect();
+        let locals: Vec<String> = (0..10).map(|i| format!("192.168.1.50:{}", 6000 + i)).collect();
+        for i in 0..10u16 {
+            s.record(us(T0), 60, Some(&syn(ME, "203.0.113.9", 6000 + i, 443)));
+            sockets.push((SockProto::Tcp, locals[i as usize].as_str(), Some("203.0.113.9:443"), 100 + u32::from(i)));
+            procs.push((100 + u32::from(i), names[i as usize].as_str(), None));
+        }
+        s.record(us(T0), 60, Some(&syn(ME, "198.51.100.1", 7000, 443)));
+        s.set_owners(owners(sockets, procs));
+        let snap = s.snapshot(10, 0);
+        let busy = snap.hosts.iter().find(|h| h.ip == "203.0.113.9").unwrap();
+        assert_eq!(busy.processes.len(), 8, "capped: {:?}", busy.processes);
+        assert!(busy.processes.windows(2).all(|w| w[0] < w[1]), "sorted, no duplicates: {:?}", busy.processes);
+        let quiet = snap.hosts.iter().find(|h| h.ip == "198.51.100.1").unwrap();
+        assert!(quiet.processes.is_empty(), "no owner known");
+    }
+
+    #[test]
+    fn dns_journal_filters_and_counts_by_field() {
+        use crate::analytics::facets::Facets;
+        use crate::analytics::views::{DnsFilter, DNS_FACETS};
+        let mut s = state();
+        s.set_owners(owners(vec![(SockProto::Udp, "192.168.1.50:5000", None, 7), (SockProto::Udp, "192.168.1.50:5001", None, 8)], vec![(7, "chrome.exe", None), (8, "svc.exe", None)]));
+        let q = |id: u16, name: &str, t: u16| App::Dns(dns::parse(&dns::build_query(id, name, t)).unwrap());
+        let nx = |id: u16, name: &str| {
+            let mut r = dns::build_response(id, name, &[], 60);
+            r[3] = (r[3] & 0xF0) | 3; // NXDOMAIN
+            App::Dns(dns::parse(&r).unwrap())
+        };
+        // chrome: a.example (answered in 5 ms), b.example (NXDOMAIN after 300 ms); svc: an AAAA
+        // query left unanswered; and an mDNS query nobody owns.
+        s.record(us(T0), 80, Some(&pkt(ME, "1.1.1.1", 5000, 53, Proto::Dns, q(1, "a.example", dns::TYPE_A))));
+        let ok = App::Dns(dns::parse(&dns::build_response(1, "a.example", &[ip("93.184.215.14")], 60)).unwrap());
+        s.record(us(T0) + 5_000, 90, Some(&pkt("1.1.1.1", ME, 53, 5000, Proto::Dns, ok)));
+        s.record(us(T0 + 1), 80, Some(&pkt(ME, "1.1.1.1", 5000, 53, Proto::Dns, q(2, "b.example", dns::TYPE_A))));
+        s.record(us(T0 + 1) + 300_000, 90, Some(&pkt("1.1.1.1", ME, 53, 5000, Proto::Dns, nx(2, "b.example"))));
+        s.record(us(T0 + 2), 80, Some(&pkt(ME, "8.8.8.8", 5001, 53, Proto::Dns, q(3, "c.example", dns::TYPE_AAAA))));
+        s.record(us(T0 + 3), 80, Some(&pkt(ME, "224.0.0.251", 5353, 5353, Proto::Dns, q(4, "tv.local", 12))));
+        let f = |spec: &str| DnsFilter { facets: Facets::parse(Some(spec), DNS_FACETS).unwrap(), ..DnsFilter::default() };
+        let names = |v: &crate::analytics::views::DnsView| v.entries.iter().map(|e| e.entry.name.as_str()).collect::<Vec<_>>().join(",");
+        let all = s.dns_filtered(&DnsFilter::default(), 100);
+        assert_eq!(names(&all), "tv.local,c.example,b.example,a.example");
+        assert_eq!(names(&s.dns_filtered(&f(r#"{"rcode":["nxdomain"]}"#), 100)), "b.example");
+        assert_eq!(names(&s.dns_filtered(&f(r#"{"rcode":["pending"]}"#), 100)), "tv.local,c.example", "no answer yet");
+        assert_eq!(names(&s.dns_filtered(&f(r#"{"process":["chrome.exe"]}"#), 100)), "b.example,a.example");
+        assert_eq!(names(&s.dns_filtered(&f(r#"{"process":["chrome.exe"],"rcode":["NOERROR"]}"#), 100)), "a.example");
+        assert_eq!(names(&s.dns_filtered(&f(r#"{"qtype":["AAAA"],"resolver":["8.8.8.8"]}"#), 100)), "c.example");
+        assert_eq!(names(&s.dns_filtered(&f(r#"{"transport":["mdns"]}"#), 100)), "tv.local");
+        let slow = DnsFilter { slow_ms: Some(100.0), ..DnsFilter::default() };
+        assert_eq!(names(&s.dns_filtered(&slow, 100)), "b.example", "only answers that took 100 ms or more");
+        let quiet = DnsFilter { hide_local: true, ..DnsFilter::default() };
+        assert_eq!(names(&s.dns_filtered(&quiet, 100)), "c.example,b.example,a.example");
+        let text = DnsFilter { q: Some("example".into()), facets: Facets::parse(Some(r#"{"process":["svc.exe"]}"#), DNS_FACETS).unwrap(), ..DnsFilter::default() };
+        assert_eq!(names(&s.dns_filtered(&text, 100)), "c.example", "text and fields combine");
+        // Counts: each field's list ignores its own filter, follows the others.
+        let v = s.dns_filtered(&f(r#"{"process":["chrome.exe"]}"#), 1);
+        assert_eq!((v.total, v.entries.len()), (2, 1), "total before the limit");
+        assert_eq!(v.facets["process"], vec![("chrome.exe".to_string(), 2), ("svc.exe".to_string(), 1)]);
+        assert_eq!(v.facets["rcode"], vec![("NOERROR".to_string(), 1), ("NXDOMAIN".to_string(), 1)]);
+        assert_eq!(v.facets["resolver"], vec![("1.1.1.1".to_string(), 2)]);
+        assert_eq!(all.facets["transport"], vec![("udp".to_string(), 3), ("mdns".to_string(), 1)]);
+        assert_eq!(s.dns(Some("b.exa"), 10).total, 1, "the old text-only search still works");
+    }
+
+    #[test]
     fn dns_journal_is_capped_at_3000_entries_and_classifies_transports() {
         let mut s = state();
         for i in 0..3100u32 {

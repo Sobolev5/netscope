@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use super::facets::{json_value, Counter, FacetCounts, Facets};
 use super::flows::{FlowState, L4};
 use super::views::{ConnView, TlsView};
 use crate::capture::engine::unix_now;
@@ -373,6 +374,52 @@ pub struct QueryResult {
     /// Matching records before `limit`.
     pub total: usize,
     pub records: Vec<serde_json::Value>,
+    /// Values of the kind's filter fields with their counts ([`facet_fields`]).
+    pub facets: FacetCounts,
+}
+
+const CONN_FACETS: [&str; 6] = ["process", "app", "country", "org", "dir", "reason"];
+const DNS_FACETS: [&str; 5] = ["rcode", "qtype", "process", "resolver", "transport"];
+const ALERT_FACETS: [&str; 5] = ["severity", "category", "kind", "process", "host"];
+
+/// The fields a journal of `kind` can be narrowed by (value lists, see `analytics::facets`).
+pub fn facet_fields(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::Connections => &CONN_FACETS,
+        Kind::Dns => &DNS_FACETS,
+        Kind::Alerts => &ALERT_FACETS,
+    }
+}
+
+/// The value of a filter field in a journal record.
+fn facet_value(kind: Kind, v: &serde_json::Value, field: &str) -> String {
+    let (pointer, missing) = match (kind, field) {
+        (Kind::Connections, "process") => ("/process/name", ""),
+        (Kind::Connections, "app") => ("/app", ""),
+        (Kind::Connections, "country") => ("/geo/country_code", ""),
+        (Kind::Connections, "org") => ("/geo/org", ""),
+        // `local` / `remote`, as the live view says it: out / in.
+        (Kind::Connections, "dir") => {
+            return match json_value(v, "/initiated", "").as_str() {
+                "local" => "out".into(),
+                "remote" => "in".into(),
+                _ => String::new(),
+            }
+        }
+        (Kind::Connections, "reason") => ("/reason", ""),
+        (Kind::Dns, "rcode") => ("/rcode", "pending"),
+        (Kind::Dns, "qtype") => ("/qtype", ""),
+        (Kind::Dns, "process") => ("/requester/name", ""),
+        (Kind::Dns, "resolver") => ("/resolver", ""),
+        (Kind::Dns, "transport") => ("/transport", ""),
+        (Kind::Alerts, "severity") => ("/severity", ""),
+        (Kind::Alerts, "category") => ("/category", ""),
+        (Kind::Alerts, "kind") => ("/kind", ""),
+        (Kind::Alerts, "process") => ("/details/process", ""),
+        (Kind::Alerts, "host") => ("/host", ""),
+        _ => return String::new(),
+    };
+    json_value(v, pointer, missing)
 }
 
 /// Records of `kind` with `from <= ts <= to` (unix seconds, both optional) whose JSON
@@ -380,7 +427,13 @@ pub struct QueryResult {
 /// [`MAX_LIMIT`]). Only the day files overlapping the range are read; a line being
 /// written at that moment (no newline yet) or one that is not JSON is ignored.
 pub fn query(dir: &Path, kind: Kind, from: Option<i64>, to: Option<i64>, q: Option<&str>, limit: usize) -> io::Result<QueryResult> {
+    query_filtered(dir, kind, from, to, q, &Facets::default(), limit)
+}
+
+/// [`query`] narrowed by value lists of the kind's [`facet_fields`], with their counts.
+pub fn query_filtered(dir: &Path, kind: Kind, from: Option<i64>, to: Option<i64>, q: Option<&str>, facets: &Facets, limit: usize) -> io::Result<QueryResult> {
     let limit = limit.min(MAX_LIMIT);
+    let mut counter = Counter::new(facet_fields(kind));
     let needle = q.map(str::to_lowercase).filter(|s| !s.is_empty());
     let from_day = from.map(|t| t.div_euclid(SECS_PER_DAY));
     let to_day = to.map(|t| t.div_euclid(SECS_PER_DAY));
@@ -419,14 +472,26 @@ pub fn query(dir: &Path, kind: Kind, from: Option<i64>, to: Option<i64>, q: Opti
                     continue;
                 }
             }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                // A complete line that is not JSON still counts (it is there) when nothing
+                // filters by field, but it is never returned.
+                if facets.is_empty() {
+                    out.total += 1;
+                }
+                continue;
+            };
+            let value_of = |f: &str| vec![facet_value(kind, &v, f)];
+            counter.add(facets, value_of);
+            if !facets.matches(value_of) {
+                continue;
+            }
             out.total += 1;
             if out.records.len() < limit {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                    out.records.push(v);
-                }
+                out.records.push(v);
             }
         }
     }
+    out.facets = counter.finish();
     Ok(out)
 }
 
@@ -558,6 +623,56 @@ pub fn parse_date(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queries_filter_by_record_fields_and_count_their_values() {
+        let dir = temp("facets");
+        fs::create_dir_all(&dir).unwrap();
+        let day = 20_381; // 2025-10-20
+        let conn = |ts: i64, process: Option<&str>, cc: Option<&str>, initiated: &str| {
+            serde_json::json!({ "ts": ts, "process": process.map(|p| serde_json::json!({ "pid": 1, "name": p })), "app": "tls",
+                "geo": cc.map(|c| serde_json::json!({ "country_code": c, "org": format!("{c} Net, Inc.") })), "initiated": initiated, "reason": "closed" })
+            .to_string()
+        };
+        let base = day * SECS_PER_DAY;
+        let lines = [
+            conn(base + 1, Some("chrome.exe"), Some("DE"), "local"),
+            conn(base + 2, Some("chrome.exe"), Some("NL"), "local"),
+            conn(base + 3, Some("svc.exe"), Some("DE"), "remote"),
+            conn(base + 4, None, None, "local"),
+            "not json".to_string(),
+        ];
+        fs::write(dir.join(file_name(Kind::Connections, day)), lines.join("\n") + "\n").unwrap();
+        let dns = [
+            serde_json::json!({ "ts": base + 5, "name": "a.example", "qtype": "A", "rcode": "NXDOMAIN", "requester": { "pid": 1, "name": "chrome.exe" }, "resolver": "1.1.1.1", "transport": "udp" }),
+            serde_json::json!({ "ts": base + 6, "name": "b.example", "qtype": "AAAA", "rcode": null, "requester": null, "resolver": "1.1.1.1", "transport": "udp" }),
+        ];
+        fs::write(dir.join(file_name(Kind::Dns, day)), dns.iter().map(|v| v.to_string() + "\n").collect::<String>()).unwrap();
+        let alerts = [serde_json::json!({ "ts": base + 7, "severity": "high", "category": "security", "kind": "port_scan", "host": "203.0.113.9", "details": { "process": "nmap.exe" } })];
+        fs::write(dir.join(file_name(Kind::Alerts, day)), alerts[0].to_string() + "\n").unwrap();
+
+        let q = |kind: Kind, spec: &str, text: Option<&str>| query_filtered(&dir, kind, None, None, text, &Facets::parse(Some(spec), facet_fields(kind)).unwrap(), 10).unwrap();
+        let ts = |r: &QueryResult| r.records.iter().map(|v| v["ts"].as_i64().unwrap() - base).collect::<Vec<_>>();
+        let r = q(Kind::Connections, "", None);
+        assert_eq!((r.total, ts(&r)), (5, vec![4, 3, 2, 1]), "no filter: the garbage line counts but is not returned");
+        let r = q(Kind::Connections, r#"{"country":["de"]}"#, None);
+        assert_eq!((r.total, ts(&r)), (2, vec![3, 1]), "a filter only counts what it can read");
+        assert_eq!(ts(&q(Kind::Connections, r#"{"process":["chrome.exe"],"country":["DE"]}"#, None)), vec![1]);
+        assert_eq!(ts(&q(Kind::Connections, r#"{"dir":["in"]}"#, None)), vec![3], "initiated remote = in");
+        assert_eq!(ts(&q(Kind::Connections, r#"{"org":["DE Net, Inc."]}"#, None)), vec![3, 1], "values with commas");
+        assert_eq!(ts(&q(Kind::Connections, r#"{"country":["DE"]}"#, Some("svc"))), vec![3], "text and fields combine");
+        let r = q(Kind::Connections, r#"{"country":["DE"]}"#, None);
+        assert_eq!(r.facets["country"], vec![("DE".to_string(), 2), ("NL".to_string(), 1)], "its own filter ignored");
+        assert_eq!(r.facets["process"], vec![("chrome.exe".to_string(), 1), ("svc.exe".to_string(), 1)]);
+        assert_eq!(r.facets["dir"], vec![("in".to_string(), 1), ("out".to_string(), 1)]);
+        assert_eq!(ts(&q(Kind::Dns, r#"{"rcode":["pending"]}"#, None)), vec![6], "no answer = pending");
+        assert_eq!(ts(&q(Kind::Dns, r#"{"process":["chrome.exe"],"qtype":["A"]}"#, None)), vec![5]);
+        assert_eq!(q(Kind::Dns, "", None).facets["resolver"], vec![("1.1.1.1".to_string(), 2)]);
+        assert_eq!(ts(&q(Kind::Alerts, r#"{"process":["NMAP.EXE"],"severity":["high"],"category":["security"],"kind":["port_scan"],"host":["203.0.113.9"]}"#, None)), vec![7]);
+        assert_eq!(q(Kind::Alerts, r#"{"severity":["low"]}"#, None).total, 0);
+        assert!(Facets::parse(Some(r#"{"rcode":["x"]}"#), facet_fields(Kind::Connections)).is_err(), "fields belong to a kind");
+        fs::remove_dir_all(&dir).ok();
+    }
 
     fn temp(name: &str) -> PathBuf {
         static N: AtomicU32 = AtomicU32::new(0);

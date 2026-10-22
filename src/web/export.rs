@@ -2,6 +2,7 @@
 
 use crate::analytics::filter::Filter;
 use crate::analytics::journal::Kind;
+use crate::analytics::views::DnsFilter;
 use crate::analytics::{SharedState, State};
 use crate::capture::file::PcapWriter;
 
@@ -154,8 +155,8 @@ pub fn processes_csv(st: &State) -> String {
     )
 }
 
-pub fn dns_csv(st: &State, q: Option<&str>) -> String {
-    let v = st.dns(q, usize::MAX);
+pub fn dns_csv(st: &State, filter: &DnsFilter) -> String {
+    let v = st.dns_filtered(filter, usize::MAX);
     csv(
         &["time_utc", "name", "type", "result", "answers", "latency_ms", "requester", "resolver", "transport", "used_by"],
         v.entries.into_iter().map(|e| {

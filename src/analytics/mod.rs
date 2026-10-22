@@ -3,6 +3,7 @@
 pub mod addr;
 pub mod anomaly;
 pub mod dnslog;
+pub mod facets;
 pub mod filter;
 pub mod flows;
 pub mod journal;

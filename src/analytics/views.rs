@@ -10,7 +10,9 @@ use super::stream::{printable_ratio, reassemble, render_text};
 use crate::decode::dissect::{dissect, summary, Layer};
 use crate::decode::sha256::hex;
 use crate::decode::Proto;
+use super::addr::is_local_scope;
 use super::dnslog::{encrypted_dns_kind, DnsEntry};
+use super::facets::{Counter, FacetCounts, Facets};
 use super::filter::{FieldValue, Filter, Record};
 use crate::decode::tlsinfo::{cipher_name, parse_server_stream, version_name, CertInfo};
 use crate::geo::{GeoInfo, GeoStatus};
@@ -67,6 +69,11 @@ pub struct ConnView {
     pub encrypted_dns: Option<&'static str>,
     /// Code signature of the owning executable: `true` signed, `false` unsigned/invalid.
     pub signed: Option<bool>,
+    /// The remote end is in a local network (private, link-local, loopback…).
+    pub lan: bool,
+    /// Milliseconds since the last packet, by the traffic clock (filter field `idle`).
+    #[serde(skip)]
+    pub idle_ms: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,6 +113,50 @@ pub struct DnsView {
     pub failures: u64,
     /// Connections carrying encrypted DNS (DoH/DoT/DoQ): lookups the journal cannot see.
     pub encrypted: Vec<ConnView>,
+    /// Values of [`DNS_FACETS`] with their counts (see `analytics::facets`).
+    pub facets: FacetCounts,
+}
+
+/// Fields the DNS journal can be narrowed by, value lists as in `analytics::facets`.
+pub const DNS_FACETS: &[&str] = &["rcode", "qtype", "process", "resolver", "transport"];
+
+/// What the DNS page asks for: a text search, value lists per field, slow answers only,
+/// and whether to leave out the local-network chatter (mDNS, `.local` names).
+#[derive(Debug, Clone, Default)]
+pub struct DnsFilter {
+    pub q: Option<String>,
+    pub facets: Facets,
+    /// Only answers that took at least this many milliseconds.
+    pub slow_ms: Option<f64>,
+    pub hide_local: bool,
+}
+
+impl DnsFilter {
+    pub fn text(q: Option<&str>) -> Self {
+        Self { q: q.map(String::from), ..Self::default() }
+    }
+
+    /// The value of a facet field for an entry (`pending`: no answer yet).
+    fn value(e: &DnsEntry, field: &str) -> Vec<String> {
+        match field {
+            "rcode" => vec![e.rcode.unwrap_or("pending").to_string()],
+            "qtype" => vec![e.qtype.to_string()],
+            "process" => vec![e.requester.as_ref().map(|r| r.name.clone()).unwrap_or_default()],
+            "resolver" => vec![e.resolver.clone()],
+            "transport" => vec![e.transport.to_string()],
+            _ => vec![],
+        }
+    }
+
+    /// Everything but the value lists (those are counted separately).
+    fn base_matches(&self, e: &DnsEntry, q: Option<&str>) -> bool {
+        let text = q.is_none_or(|q| {
+            e.name.contains(q) || e.requester.as_ref().is_some_and(|r| r.name.to_lowercase().contains(q)) || e.answers.iter().any(|a| a.contains(q)) || e.rcode.is_some_and(|r| r.eq_ignore_ascii_case(q))
+        });
+        let slow = self.slow_ms.is_none_or(|min| e.latency_ms.is_some_and(|l| l >= min));
+        let local = !self.hide_local || !(e.transport == "mdns" || e.name.ends_with(".local") || e.name.ends_with(".local."));
+        text && slow && local
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -299,6 +350,8 @@ pub const CONN_FIELDS: &[(&str, &[&str])] = &[
     ("ja4", &[]),
     ("signed", &[]),
     ("doh", &["encrypted_dns"]),
+    ("lan", &["local_net"]),
+    ("idle", &["age"]),
 ];
 
 impl Record for ConnView {
@@ -344,6 +397,8 @@ impl Record for ConnView {
             "ja4" => self.tls.as_ref().map_or(FieldValue::Missing, |t| s(&t.ja4)),
             "signed" => self.signed.map_or(FieldValue::Missing, FieldValue::Bool),
             "doh" => FieldValue::Bool(self.encrypted_dns.is_some()),
+            "lan" => FieldValue::Bool(self.lan),
+            "idle" => FieldValue::Num(self.idle_ms),
             _ => FieldValue::Missing,
         }
     }
@@ -409,6 +464,8 @@ impl State {
                     SigStatus::Unsigned | SigStatus::Invalid => Some(false),
                     SigStatus::Unknown => None,
                 }),
+            lan: is_local_scope(&f.key.remote.ip()),
+            idle_ms: (self.now.saturating_mul(1_000_000) - f.last_us).max(0) as f64 / 1000.0,
         }
     }
 
@@ -443,7 +500,13 @@ impl State {
 
     /// The DNS journal, newest first; `q` matches the name, requester or answers.
     pub fn dns(&self, q: Option<&str>, limit: usize) -> DnsView {
-        let q = q.map(str::to_lowercase).filter(|q| !q.is_empty());
+        self.dns_filtered(&DnsFilter::text(q), limit)
+    }
+
+    /// The DNS journal narrowed by `filter`, newest first, with the value counts of
+    /// [`DNS_FACETS`] for the filter bar.
+    pub fn dns_filtered(&self, filter: &DnsFilter, limit: usize) -> DnsView {
+        let q = filter.q.as_deref().map(str::to_lowercase).filter(|q| !q.is_empty());
         // Which programs connected to which addresses (to show who used an answer).
         let mut users: HashMap<String, Vec<String>> = HashMap::new();
         for f in self.flows() {
@@ -454,18 +517,14 @@ impl State {
                 }
             }
         }
-        let matching: Vec<&DnsEntry> = self
-            .dns_log
-            .iter()
-            .filter(|e| {
-                q.as_ref().is_none_or(|q| {
-                    e.name.contains(q.as_str())
-                        || e.requester.as_ref().is_some_and(|r| r.name.to_lowercase().contains(q.as_str()))
-                        || e.answers.iter().any(|a| a.contains(q.as_str()))
-                        || e.rcode.is_some_and(|r| r.eq_ignore_ascii_case(q))
-                })
-            })
-            .collect();
+        let mut counter = Counter::new(DNS_FACETS);
+        let mut matching: Vec<&DnsEntry> = Vec::new();
+        for e in self.dns_log.iter().filter(|e| filter.base_matches(e, q.as_deref())) {
+            counter.add(&filter.facets, |f| DnsFilter::value(e, f));
+            if filter.facets.matches(|f| DnsFilter::value(e, f)) {
+                matching.push(e);
+            }
+        }
         let total = matching.len();
         let entries = matching
             .into_iter()
@@ -483,7 +542,7 @@ impl State {
             .map(|f| self.conn_view(f))
             .collect();
         encrypted.sort_unstable_by_key(|c| std::cmp::Reverse(c.last_us));
-        DnsView { entries, total, queries: self.dns_log.queries, failures: self.dns_log.failures, encrypted }
+        DnsView { entries, total, queries: self.dns_log.queries, failures: self.dns_log.failures, encrypted, facets: counter.finish() }
     }
 
     pub fn processes(&self) -> ProcessesView {

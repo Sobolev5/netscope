@@ -172,6 +172,28 @@ async fn filters_dns_watch_and_exports() {
     let e = &dns["entries"][0];
     assert_eq!((e["name"].as_str(), e["rcode"].as_str()), (Some("github.com"), Some("NOERROR")));
     assert_eq!(e["answers"][0], "140.82.121.4");
+    // Filters by field (`f`, URL-encoded JSON) with the value counts for the filter bar.
+    let dns_all = json(&request(addr, "GET", "/api/dns").await.2);
+    let types = dns_all["facets"]["qtype"].as_array().unwrap().clone();
+    assert!(!types.is_empty(), "{dns_all}");
+    let (qtype, n) = (types[0][0].as_str().unwrap().to_string(), types[0][1].as_u64().unwrap());
+    let f = |spec: &str| spec.replace('{', "%7B").replace('}', "%7D").replace('"', "%22").replace('[', "%5B").replace(']', "%5D").replace(' ', "%20");
+    let (st, _, body) = request(addr, "GET", &format!("/api/dns?f={}", f(&format!(r#"{{"qtype":["{qtype}"]}}"#)))).await;
+    let v = json(&body);
+    assert_eq!((st, v["total"].as_u64()), (200, Some(n)), "{v}");
+    assert!(v["entries"].as_array().unwrap().iter().all(|e| e["qtype"] == qtype.as_str()));
+    let mdns = |q: &str| {
+        let url = format!("/api/dns?{q}f={}", f(r#"{"transport":["mdns"]}"#));
+        async move { json(&request(addr, "GET", &url).await.2)["total"].as_u64().unwrap() }
+    };
+    assert!(mdns("").await > 0, "the demo sends mDNS queries");
+    assert_eq!(mdns("hide_local=true&").await, 0, "hidden on request");
+    assert_eq!(mdns("hide_local=false&").await, mdns("").await);
+    let slow = json(&request(addr, "GET", "/api/dns?slow=0.001").await.2);
+    assert!(slow["total"].as_u64().unwrap() > 0 && slow["entries"].as_array().unwrap().iter().all(|e| e["latency_ms"].as_f64().is_some_and(|l| l >= 0.001)), "{slow}");
+    assert!(slow["total"].as_u64() < dns_all["total"].as_u64(), "unanswered queries have no latency");
+    let (_, _, csv) = request(addr, "GET", &format!("/api/export/dns.csv?f={}", f(&format!(r#"{{"qtype":["{qtype}"]}}"#)))).await;
+    assert_eq!(String::from_utf8_lossy(&csv).lines().count() as u64, n + 1, "the export follows the filter");
 
     // Route watch: add, list, remove; removing twice is a 404.
     let (st, _, w) = request(addr, "POST", "/api/watch?ip=127.0.0.1&label=self").await;
@@ -358,6 +380,11 @@ async fn every_api_error_is_a_json_envelope() {
         ("GET", "/api/stats?hosts=abc", 400, "bad_request", "hosts"),
         ("GET", "/api/stats?alerts=-1", 400, "bad_request", "alerts"),
         ("GET", "/api/dns?limit=x", 400, "bad_request", "limit"),
+        ("GET", "/api/dns?f=%7B%22nope%22:[]%7D", 400, "bad_request", "unknown filter field"),
+        ("GET", "/api/dns?f=country=DE", 400, "bad_request", "JSON object"),
+        ("GET", "/api/export/dns.csv?f=%5B%5D", 400, "bad_request", "JSON object"),
+        ("GET", "/api/dns?slow=fast", 400, "bad_request", "slow"),
+        ("GET", "/api/journal?kind=dns&f=%7B%22country%22:[%22DE%22]%7D", 400, "bad_request", "unknown filter field"),
         ("GET", "/api/sockets?pid=x", 400, "bad_request", "pid"),
         ("GET", "/api/geo", 400, "bad_request", "ip"),
         ("GET", "/api/geo?ip=", 400, "bad_request", "IPv4 or IPv6"),
@@ -937,6 +964,11 @@ async fn settings_page_without_a_host() {
 
 /// A replayed capture with a journal: closed connections are journaled during the replay,
 /// the rest by the shutdown step; then the files are queried through the API.
+/// `(value, count)` of the `app` filter field in a journal response.
+fn v_apps(v: &serde_json::Value) -> Vec<(String, u64)> {
+    v["facets"]["app"].as_array().unwrap().iter().map(|x| (x[0].as_str().unwrap().to_string(), x[1].as_u64().unwrap())).collect()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn journal_endpoints_after_a_replay_and_a_forced_shutdown() {
     use netscope::analytics::journal::{self, Kind};
@@ -1011,6 +1043,15 @@ async fn journal_endpoints_after_a_replay_and_a_forced_shutdown() {
     assert!(records.iter().all(|r| r["process"].is_null()), "a replayed file has no process table");
     let (_, body) = get(addr, "/api/journal?kind=connections&q=no-such-thing-anywhere").await;
     assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["total"], 0);
+    // Field filters (`f`): the protocol counts of the response add up, and filtering by one
+    // of them returns exactly that many records.
+    let apps = v_apps(&serde_json::from_str::<serde_json::Value>(&get(addr, "/api/journal?kind=connections").await.1).unwrap());
+    assert!(apps.iter().map(|a| a.1).sum::<u64>() == flows as u64 && !apps.is_empty(), "{apps:?}");
+    let (app, n) = apps[0].clone();
+    let (st, body) = get(addr, &format!("/api/journal?kind=connections&f=%7B%22app%22:%5B%22{app}%22%5D%7D")).await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((st, v["total"].as_u64()), (200, Some(n)), "{body}");
+    assert!(v["records"].as_array().unwrap().iter().all(|r| r["app"] == app.as_str()));
     // DNS records today; alerts carry the capture's own (old) time, so the default window misses them.
     let (_, body) = get(addr, "/api/journal?kind=dns").await;
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();

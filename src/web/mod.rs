@@ -30,7 +30,8 @@ mod metrics;
 
 use crate::analytics::filter::{Filter, FilterError};
 use crate::analytics::journal::{self, Kind};
-use crate::analytics::views::CONN_FIELDS;
+use crate::analytics::facets::Facets;
+use crate::analytics::views::{DnsFilter, CONN_FIELDS, DNS_FACETS};
 use crate::analytics::SharedState;
 use crate::capture::engine::unix_now;
 use crate::settings::{Settings, SettingsHost, SettingsPatch};
@@ -437,10 +438,27 @@ async fn filter_fields() -> Response {
 struct DnsQuery {
     q: Option<String>,
     limit: Option<usize>,
+    /// Value lists per field, `{"rcode":["NXDOMAIN"],"process":["chrome.exe"]}`.
+    f: Option<String>,
+    /// Only answers that took at least this many milliseconds.
+    slow: Option<f64>,
+    /// Leave out mDNS and `.local` names.
+    hide_local: Option<bool>,
+}
+
+impl DnsQuery {
+    fn filter(&self) -> Result<DnsFilter, Box<Response>> {
+        let facets = Facets::parse(self.f.as_deref(), DNS_FACETS).map_err(|e| Box::new(api_error(StatusCode::BAD_REQUEST, "bad_request", e)))?;
+        Ok(DnsFilter { q: self.q.clone(), facets, slow_ms: self.slow.filter(|v| v.is_finite() && *v > 0.0), hide_local: self.hide_local.unwrap_or(false) })
+    }
 }
 
 async fn dns(State(s): State<AppState>, Query(q): Query<DnsQuery>) -> Response {
-    let v = s.shared.read().dns(q.q.as_deref(), q.limit.unwrap_or(500).min(MAX_LIMIT * 5));
+    let filter = match q.filter() {
+        Ok(f) => f,
+        Err(r) => return *r,
+    };
+    let v = s.shared.read().dns_filtered(&filter, q.limit.unwrap_or(500).min(MAX_LIMIT * 5));
     to_json(&v)
 }
 
@@ -507,7 +525,11 @@ async fn export_processes(State(s): State<AppState>) -> Response {
 }
 
 async fn export_dns(State(s): State<AppState>, Query(q): Query<DnsQuery>) -> Response {
-    let body = export::dns_csv(&s.shared.read(), q.q.as_deref());
+    let filter = match q.filter() {
+        Ok(f) => f,
+        Err(r) => return *r,
+    };
+    let body = export::dns_csv(&s.shared.read(), &filter);
     download(body.into_bytes(), "text/csv; charset=utf-8", format!("netscope-dns-{}.csv", stamp()))
 }
 
@@ -665,6 +687,8 @@ struct JournalQuery {
     limit: Option<usize>,
     /// `json` (default), `jsonl` or `csv`.
     format: Option<String>,
+    /// Value lists per field of the kind (`journal::facet_fields`), as a JSON object.
+    f: Option<String>,
 }
 
 /// Journal records of one kind, newest first; `jsonl` and `csv` are downloads.
@@ -684,9 +708,13 @@ async fn journal_query(State(s): State<AppState>, Query(q): Query<JournalQuery>)
     if from > to {
         return api_error(StatusCode::BAD_REQUEST, "bad_request", "from must not be after to");
     }
+    let facets = match Facets::parse(q.f.as_deref(), journal::facet_fields(kind)) {
+        Ok(f) => f,
+        Err(e) => return api_error(StatusCode::BAD_REQUEST, "bad_request", e),
+    };
     let dir = s.journal_dir.clone();
     let text = q.q.clone();
-    let result = tokio::task::spawn_blocking(move || journal::query(&dir, kind, Some(from), Some(to), text.as_deref(), limit)).await;
+    let result = tokio::task::spawn_blocking(move || journal::query_filtered(&dir, kind, Some(from), Some(to), text.as_deref(), &facets, limit)).await;
     let r = match result {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal", format!("cannot read the journal: {e}")),
@@ -695,7 +723,7 @@ async fn journal_query(State(s): State<AppState>, Query(q): Query<JournalQuery>)
     match format {
         "jsonl" => download(export::journal_jsonl(&r.records).into_bytes(), "application/x-ndjson", format!("netscope-{}-{}.jsonl", kind.as_str(), stamp())),
         "csv" => download(export::journal_csv(kind, &r.records).into_bytes(), "text/csv; charset=utf-8", format!("netscope-{}-{}.csv", kind.as_str(), stamp())),
-        _ => to_json(&serde_json::json!({ "kind": kind, "from": from, "to": to, "total": r.total, "records": r.records })),
+        _ => to_json(&serde_json::json!({ "kind": kind, "from": from, "to": to, "total": r.total, "records": r.records, "facets": r.facets })),
     }
 }
 

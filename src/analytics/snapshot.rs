@@ -1,5 +1,8 @@
 //! JSON-ready view of [`State`] served by `/api/stats` and streamed over `/api/ws`.
 
+use std::collections::HashMap;
+use std::net::IpAddr;
+
 use serde::Serialize;
 
 use super::addr::is_local_scope;
@@ -15,6 +18,8 @@ const SERIES_POINTS: usize = 120;
 const DNS_TOP: usize = 15;
 /// Connections included in every snapshot (the UI pages through `/api/connections` for more).
 const CONNECTIONS: usize = 300;
+/// Program names listed per host (for the map's and the host list's program filter).
+const HOST_PROCESSES: usize = 8;
 
 #[derive(Debug, Serialize)]
 pub struct Snapshot {
@@ -77,6 +82,8 @@ pub struct HostView {
     pub hops: Option<u8>,
     /// Best TCP handshake round trip in milliseconds.
     pub rtt_ms: Option<f64>,
+    /// Programs that talked to this host (at most `HOST_PROCESSES`, by name).
+    pub processes: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,6 +96,15 @@ impl State {
     pub fn snapshot(&self, max_hosts: usize, max_alerts: usize) -> Snapshot {
         let mut hosts: Vec<_> = self.hosts.iter().collect();
         hosts.sort_unstable_by(|a, b| b.1.total().cmp(&a.1.total()).then(a.0.cmp(b.0)));
+        let mut programs: HashMap<IpAddr, Vec<String>> = HashMap::new();
+        for f in self.flows() {
+            if let Some(p) = &f.process {
+                let list = programs.entry(f.key.remote.ip()).or_default();
+                if list.len() < HOST_PROCESSES && !list.contains(&p.name) {
+                    list.push(p.name.clone());
+                }
+            }
+        }
         let hosts = hosts
             .into_iter()
             .take(max_hosts)
@@ -111,6 +127,11 @@ impl State {
                     geo: self.geo.as_ref().and_then(|g| g.lookup(*ip)),
                     hops: h.hops,
                     rtt_ms: h.rtt_us.map(|r| r as f64 / 1000.0),
+                    processes: programs.get(ip).map(|l| {
+                        let mut l = l.clone();
+                        l.sort_unstable();
+                        l
+                    }).unwrap_or_default(),
                 }
             })
             .collect();
