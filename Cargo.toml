@@ -1,6 +1,6 @@
 [package]
 name = "netscope"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Real-time network traffic analyzer with anomaly detection and an embedded web dashboard"
 license = "MIT"

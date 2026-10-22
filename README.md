@@ -231,14 +231,18 @@ Memory: 4096 connections, 200 packets each, 96 MiB of stored frames at most.
 
 ## Architecture
 
-```
-capture thread (std::thread)                     tokio runtime
-┌───────────────────────────────┐               ┌──────────────────────────────────────┐
-│ libpcap/Npcap (loaded at      │   decode →    │ publisher: 1 snapshot/s → watch chan │
-│ runtime) | .pcap reader | demo│── record() ──►│ GET /           embedded dashboard   │
-└───────────────────────────────┘   Arc<RwLock<State>>  GET /api/stats | /api/alerts      │
-                                                │ GET /api/health  WS /api/ws (push)  │
-                                                └──────────────────────────────────────┘
+```text
+capture thread (std::thread)            tokio runtime
++--------------------------------+      +---------------------------------------+
+| libpcap / Npcap (loaded at     |      | publisher: 1 snapshot/s -> watch chan |
+| runtime) | .pcap reader | demo |      | GET /             embedded dashboard  |
++--------------------------------+      | GET /api/stats    /api/alerts  ...    |
+                |                       | GET /api/health   WS /api/ws (push)   |
+                | decode -> record()    +---------------------------------------+
+                v  writes                                   ^  reads
++-------------------------------------------------------------------------------+
+|              Arc<RwLock<State>>  (hosts, flows, alerts, journal)              |
++-------------------------------------------------------------------------------+
 ```
 
 | Module | Responsibility |
