@@ -51,6 +51,11 @@ function Find-Iscc {
     foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
     throw "Inno Setup not found: install it from https://jrsoftware.org/isdl.php or set `$env:ISCC to ISCC.exe"
 }
+# Inno Setup reads a script without a UTF-8 byte order mark in the ANSI code page: the
+# Russian task names and messages would come out as mojibake.
+$iss = Join-Path $root "installer\netscope.iss"
+$head = [System.IO.File]::ReadAllBytes($iss)[0..2]
+if ($head[0] -ne 0xEF -or $head[1] -ne 0xBB -or $head[2] -ne 0xBF) { throw "$iss must be saved as UTF-8 with BOM" }
 $iscc = Find-Iscc
 New-Item -ItemType Directory -Force (Join-Path $root "dist") | Out-Null
 $redist = Join-Path $root "installer\redist"

@@ -1,6 +1,6 @@
-; NetScope Windows installer (Inno Setup 6.1+). Built by scripts\build-installer.ps1,
+﻿; NetScope Windows installer (Inno Setup 6.1+). Built by scripts\build-installer.ps1,
 ; which passes the version and the directory with the release binaries:
-;   ISCC.exe /DAppVersion=0.3.0 /DBinDir=..\target\release installer\netscope.iss
+;   ISCC.exe /DAppVersion=0.4.0 /DBinDir=..\target\release installer\netscope.iss
 ; The "full" build (scripts\build-installer.ps1 -Full) adds, for machines without internet:
 ;   /DWebView2Local=<Evergreen standalone installer .exe>  — the WebView2 runtime, embedded
 ;   /DGeoIPDir=<dir with dbip-*.mmdb>                        — geolocation databases, embedded
