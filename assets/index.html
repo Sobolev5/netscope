@@ -54,6 +54,8 @@
   .fval { border: 1px solid #bfdbfe; background: var(--accent-soft); border-radius: 999px; padding: 1px 10px; font-size: 12px; color: #1e40af; cursor: pointer; white-space: nowrap; }
   .fval:hover { background: #dbeafe; }
   .fval b { font-weight: 600; }
+  .linkbtn { display: block; margin-left: auto; padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; }
+  .linkbtn:hover { text-decoration: underline; }
   .fadd { cursor: pointer; border-bottom: 1px dotted #a8b3c2; }
   .fadd:hover { border-bottom-color: var(--accent); background: var(--accent-soft); }
   .pk td { padding: 2px 8px; border-bottom: 1px solid #fff; font-size: 12px; white-space: nowrap; }
@@ -239,7 +241,7 @@ const I18N = {
     fb_sig: "Подпись", fb_goes_to: "Ходит в страну", fb_temp: "запуск из Temp/Downloads", fb_exposed: "открыт наружу", fb_exposed_tip: "слушает не только на loopback: доступен из сети",
     fb_category: "Категория", fb_kind: "Тип", fb_severity: "Уровень", fb_period: "Период", fb_rcode: "Результат", fb_pending: "без ответа", fb_transport: "Транспорт",
     fb_slow: "Медленные", fb_hide_local: "без mDNS и .local", fb_dir: "Направление", fb_reason: "Причина", fb_open: "открытые", fb_unsigned: "неподписанные",
-    programs: "Программы", proc_ph: "программа или путь…", alert_ph: "поиск по тексту…", map_here: "В этой точке", map_n_hosts: "{n} хостов",
+    hops_n_short: "{n} хоп.", programs: "Программы", proc_ph: "программа или путь…", alert_ph: "поиск по тексту…", map_here: "В этой точке", map_n_hosts: "{n} хостов",
   },
   en: {
     connecting: "connecting…", starting: "starting", live: "● live", replay: "replaying", finished: "finished", failed: "capture failed",
@@ -347,7 +349,7 @@ const I18N = {
     fb_sig: "Signature", fb_goes_to: "Talks to country", fb_temp: "runs from Temp/Downloads", fb_exposed: "reachable", fb_exposed_tip: "listens beyond loopback: reachable from the network",
     fb_category: "Category", fb_kind: "Type", fb_severity: "Severity", fb_period: "Period", fb_rcode: "Result", fb_pending: "no answer", fb_transport: "Transport",
     fb_slow: "Slow", fb_hide_local: "no mDNS and .local", fb_dir: "Direction", fb_reason: "Reason", fb_open: "open", fb_unsigned: "unsigned",
-    programs: "Programs", proc_ph: "program or path…", alert_ph: "search the text…", map_here: "At this point", map_n_hosts: "{n} hosts",
+    hops_n_short: "{n} hops", programs: "Programs", proc_ph: "program or path…", alert_ph: "search the text…", map_here: "At this point", map_n_hosts: "{n} hosts",
   },
 };
 
@@ -1152,15 +1154,14 @@ function viewHosts(s) {
   const watched = new Set((ui.watch ? ui.watch.targets : []).map((x) => x.ip));
   const rows = list.map((h) => `<tr class="clickable" data-host="${esc(h.ip)}">
       <td class="max-w-[260px]"><div class="truncate font-medium">${h.flagged ? `<span class="text-red-600" title="${esc(t("spike_tip"))}">⚠</span> ` : ""}${esc(h.name || h.ip)}${h.name_source ? ` <span class="chip bg-slate-100 text-slate-500">${SOURCE[h.name_source] || esc(h.name_source)}</span>` : ""}</div><div class="mono text-[11px] text-slate-500">${esc(h.ip)}${h.scope === "local" ? " · " + t("lan") : ""}</div></td>
-      <td class="whitespace-nowrap">${fcell("country", h.geo && h.geo.country_code, geoLine(h.geo))}</td><td class="max-w-[200px] truncate text-[12px]">${fcell("org", h.geo && h.geo.org, orgLine(h.geo))}</td>
+      <td class="max-w-[210px] truncate" title="${esc(placeText(h.geo))}">${fcell("country", h.geo && h.geo.country_code, geoLine(h.geo))}</td><td class="max-w-[180px] truncate text-[12px]">${fcell("org", h.geo && h.geo.org, orgLine(h.geo))}</td>
       <td class="max-w-[140px] truncate text-[12px]">${(h.processes || []).slice(0, 3).map((p) => fcell("process", p, esc(p))).join(", ") || '<span class="text-slate-300">—</span>'}</td>
-      <td class="r">${numOr(h.hops)}</td><td class="r">${qualityCell(h)}</td><td>${h.protocols.map((p) => fcell("proto", p, chip(p))).join(" ")}</td>
-      <td class="r num text-sky-700">${fmtBytes(h.bytes_in)}</td><td class="r num text-violet-700">${fmtBytes(h.bytes_out)}</td>
-      <td class="w-20">${bar((h.bytes_in + h.bytes_out) / top)}</td><td class="r num text-slate-500">${ago(s.now, h.last_seen)}</td>
-      <td class="r whitespace-nowrap">${h.scope === "local" ? "" : `<button class="btn" data-trace-goto="${esc(h.ip)}">${t("route_btn")}</button> ${watched.has(h.ip) ? `<span class="chip bg-emerald-50 text-emerald-700">${t("watching")}</span>` : `<button class="btn" data-watch-add="${esc(h.ip)}" data-label="${esc(h.name || "")}">${t("watch_btn")}</button>`}`}</td></tr>`).join("");
+      <td class="r">${qualityCell(h)}${h.hops !== null && h.hops !== undefined ? `<div class="num text-[11px] text-slate-400">${t("hops_n_short", { n: h.hops })}</div>` : ""}</td><td>${h.protocols.map((p) => fcell("proto", p, chip(p))).join(" ")}</td>
+      <td class="r w-28 whitespace-nowrap"><div class="num text-[12px]"><span class="text-sky-700">↓ ${fmtBytes(h.bytes_in)}</span> <span class="text-violet-700">↑ ${fmtBytes(h.bytes_out)}</span></div>${bar((h.bytes_in + h.bytes_out) / top)}</td><td class="r num text-slate-500">${ago(s.now, h.last_seen)}</td>
+      <td class="r whitespace-nowrap text-[12px] leading-5">${h.scope === "local" ? "" : `<button type="button" class="linkbtn" data-trace-goto="${esc(h.ip)}">${t("route_btn")}</button>${watched.has(h.ip) ? `<span class="chip bg-emerald-50 text-emerald-700">${t("watching")}</span>` : `<button type="button" class="linkbtn" data-watch-add="${esc(h.ip)}" data-label="${esc(h.name || "")}">${t("watch_btn")}</button>`}`}</td></tr>`).join("");
   return panel(`${t("hosts")} <span class="sub">· ${shownOf(list.length, s.hosts.length)} · ${t("hosts_hint")}</span>`, `${facetBar("hosts", defs, s.hosts)}<div class="scroll max-h-[78vh]"><table class="grid-table">
-      <thead><tr><th>${t("host")}</th><th>${t("where")}</th><th>${t("provider")}</th><th>${t("programs")}</th><th class="r" title="${esc(t("hops_tip"))}">${t("hops")}</th><th class="r" title="${esc(t("rtt_tip"))}">${t("rtt")}</th><th>${t("protocols")}</th><th class="r">↓</th><th class="r">↑</th><th>${t("share")}</th><th class="r">${t("act")}</th><th></th></tr></thead>
-      <tbody>${rows || empty(12, s.hosts.length ? t("nothing") : t("waiting"))}</tbody></table></div>`, "",
+      <thead><tr><th>${t("host")}</th><th>${t("where")}</th><th>${t("provider")}</th><th>${t("programs")}</th><th class="r" title="${esc(t("rtt_tip") + "; " + t("hops_tip"))}">${t("rtt")}</th><th>${t("protocols")}</th><th class="r">${t("traffic")}</th><th class="r">${t("act")}</th><th></th></tr></thead>
+      <tbody>${rows || empty(9, s.hosts.length ? t("nothing") : t("waiting"))}</tbody></table></div>`, "",
     `<input id="host-q" type="search" class="input w-64" value="${esc(ui.hostQuery)}" placeholder="${esc(t("host_ph"))}" autocomplete="off"><a class="btn" href="/api/export/hosts.csv">${t("export_csv")}</a>`);
 }
 
